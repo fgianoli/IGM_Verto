@@ -1,0 +1,21 @@
+[general]
+name=IGM Verto Coordinate Converter
+qgisMinimumVersion=3.16
+qgisMaximumVersion=4.99
+supportsQt6=True
+description=[EN] Coordinate conversion using the official IGM grids (Verto on line API). [IT] Conversione di coordinate con i grigliati ufficiali IGM (API Verto on line).
+about=[EN] Plugin for QGIS 3 and 4 that converts coordinates using the IGM "Verto on line" REST API (official national grids), more accurate than standard PROJ transformations between Italian datums (Monte Mario/Roma40, ED50, IGM95, ETRS89/RDN2008). Features: reproject vector layers, manual coordinate conversion, batch conversion from CSV, map-click tool and a Processing algorithm. Requires an internet connection.
+    [IT] Plugin per QGIS 3 e 4 che converte coordinate usando l'API REST "Verto on line" dell'IGM (grigliati nazionali ufficiali), piu' precisa delle trasformazioni PROJ standard tra i datum italiani (Monte Mario/Roma40, ED50, IGM95, ETRS89/RDN2008). Funzionalita': riproiezione di layer vettoriali, conversione manuale di coordinate, conversione batch da file CSV, strumento di click sulla mappa e algoritmo Processing. Richiede una connessione internet.
+    Servizio IGM / IGM service: https://igmi.esercito.difesa.it/servizi/verto-online/
+version=1.1.0
+author=Federico
+email=fritz4@gmail.com
+tracker=https://igmi.esercito.difesa.it/servizi/verto-online/
+repository=https://igmi.esercito.difesa.it/servizi/verto-online/
+homepage=https://igmi.esercito.difesa.it/servizi/verto-online/
+category=Vector
+icon=icon.svg
+tags=igm,coordinate,conversione,riproiezione,grigliati,verto,italia,datum,epsg,reproject
+experimental=False
+deprecated=False
+hasProcessingProvider=yes
