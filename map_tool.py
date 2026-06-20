@@ -38,6 +38,13 @@ class VertoMapTool(QgsMapToolEmitPoint):
             epsg = pick_target_srs(self.canvas, exclude_epsg=in_epsg)
             if epsg is None:
                 return
+            if converter.same_datum(in_epsg, epsg):
+                self.iface.messageBar().pushMessage(
+                    "IGM Verto",
+                    "Origine e destinazione hanno lo stesso datum: "
+                    "conversione non supportata dal servizio IGM.",
+                    level=Qgis.MessageLevel.Warning)
+                return
             self.target_epsg = epsg
 
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)

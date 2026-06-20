@@ -43,9 +43,7 @@ class SettingsDialog(QDialog):
         layout.addLayout(refresh_row)
 
         buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save
-            | QDialogButtonBox.StandardButton.Cancel
-        )
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         layout.addWidget(buttons)
 
         self.refresh_btn.clicked.connect(self.refresh_srs)

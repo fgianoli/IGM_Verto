@@ -32,10 +32,14 @@ c'&egrave; un'intestazione e i numeri delle colonne E ed N. Scegli i sistemi e
 il file di output: viene creato un nuovo CSV con due colonne aggiuntive
 (<code>E_out</code>, <code>N_out</code>); opzionalmente il risultato viene
 caricato come layer di punti.</li>
-<li><b>Layer vettoriale</b> &ndash; scegli un layer (punti, linee o poligoni),
-eventualmente solo gli elementi selezionati, e i sistemi di origine
-(precompilato dal CRS del layer) e destinazione. Viene creato un nuovo layer in
-memoria con tutte le geometrie convertite vertice per vertice.</li>
+<li><b>Layer vettoriale</b> (prima scheda) &ndash; due modalit&agrave;:
+<i>Layer del progetto</i> (scegli un layer, eventualmente solo gli elementi
+selezionati) oppure <i>Cartella (batch)</i> per convertire in blocco tutti i
+file vettoriali di una cartella (anche le sottocartelle). L'output pu&ograve;
+essere creato <b>in memoria</b> (solo nel progetto) o <b>salvato su file</b>
+(GeoPackage, Shapefile, GeoJSON). In batch indichi una cartella di output e il
+formato; l'EPSG di origine &egrave; letto dal CRS di ciascun file. Le geometrie
+(punti, linee, poligoni, multi) vengono convertite vertice per vertice.</li>
 </ul>
 
 <h4>2. Click sulla mappa</h4>

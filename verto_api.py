@@ -2,32 +2,21 @@
 """
 Client per l'API IGM "VERTO on line".
 
-Documentazione (manuale-verto-online):
-    Endpoint POST JSON: https://igmi.esercito.difesa.it/porta-magna/wps/volapi
+Endpoint POST JSON: https://igmi.esercito.difesa.it/porta-magna/wps/volapi
 
-    Richiesta "info":
-        {"richiesta": "info"}
-    Risposta:
-        {"maxCoord": 32000, "srsSupportati": [{"epsg": 4265, "descrizione": "..."}, ...]}
-
-    Richiesta "conversione":
-        {
-          "richiesta": "conversione",
-          "utente": "...", "chiave": "...",
-          "inEpsg": 4265, "outEpsg": 6706,
-          "coordinate": [{"e": 7.0, "n": 37.0}, ...]
-        }
-    Risposta:
-        {"stato": "successo", "coordinate": [{"e": ..., "n": ...}, ...]}
-    Errore:
-        {"stato": "errore", "dove": "...", "messaggio": "..."}
+Richiesta "info":      {"richiesta": "info"}
+Richiesta "conversione":
+    {"richiesta": "conversione", "utente": "...", "chiave": "...",
+     "inEpsg": 4265, "outEpsg": 6706,
+     "coordinate": [{"e": 7.0, "n": 37.0}, ...]}
+Risposta OK:  {"stato": "successo", "coordinate": [{"e": ..., "n": ...}, ...]}
+Errore:       {"stato": "errore", "dove": "...", "messaggio": "..."}
 
 Le coordinate geografiche sono SEMPRE in gradi sessadecimali.
 Le conversioni tra lo stesso datum non sono supportate.
 
-Questo modulo e' indipendente dalla GUI e funziona sia dentro QGIS
-(usando QgsBlockingNetworkRequest, che rispetta proxy e impostazioni di rete)
-sia fuori (fallback urllib), per facilitare i test.
+Le richieste di rete usano esclusivamente QgsBlockingNetworkRequest, che
+rispetta le impostazioni di proxy/SSL di QGIS.
 """
 
 import json
@@ -59,48 +48,51 @@ class VertoError(Exception):
         return self.message
 
 
-def _http_post_json(url, payload, timeout_ms=TIMEOUT_MS):
-    """Esegue una POST JSON e restituisce il dizionario di risposta."""
-    body = json.dumps(payload).encode("utf-8")
+def _parse_json(text):
+    """Interpreta la risposta JSON tollerando righe di log non-JSON.
 
-    if _HAS_QGIS:
-        request = QNetworkRequest(QUrl(url))
-        request.setHeader(
-            QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json"
-        )
-        blocking = QgsBlockingNetworkRequest()
-        err = blocking.post(request, QByteArray(body), True)
-        if err != QgsBlockingNetworkRequest.ErrorCode.NoError:
-            raise VertoError(
-                "Errore di rete: {}".format(blocking.errorMessage() or err)
-            )
-        reply = blocking.reply()
-        raw = bytes(reply.content())
-        if not raw:
-            raise VertoError("Risposta vuota dal server IGM.")
-        try:
-            return json.loads(raw.decode("utf-8"))
-        except ValueError:
-            raise VertoError(
-                "Risposta non valida dal server IGM: {}".format(raw[:200])
-            )
-
-    # Fallback urllib (test / uso standalone)
-    import urllib.request
-    import urllib.error
-
-    req = urllib.request.Request(
-        url, data=body, headers={"Content-Type": "application/json"}
-    )
+    Il server IGM puo' anteporre alla risposta una riga di log
+    (es. "QUERY: INSERT INTO vol.log ..."); in tal caso si estrae
+    l'oggetto JSON dal primo '{' all'ultimo '}'.
+    """
     try:
-        with urllib.request.urlopen(req, timeout=timeout_ms / 1000.0) as resp:
-            raw = resp.read()
-    except urllib.error.URLError as exc:
-        raise VertoError("Errore di rete: {}".format(exc))
-    try:
-        return json.loads(raw.decode("utf-8"))
+        return json.loads(text)
     except ValueError:
-        raise VertoError("Risposta non valida dal server IGM.")
+        start = text.find("{")
+        end = text.rfind("}")
+        if start != -1 and end != -1 and end > start:
+            try:
+                return json.loads(text[start:end + 1])
+            except ValueError:
+                pass
+        raise VertoError(
+            "Risposta non valida dal server IGM: {}".format(text[:200])
+        )
+
+
+def _http_post_json(url, payload, timeout_ms=TIMEOUT_MS):
+    """Esegue una POST JSON verso il servizio IGM e restituisce il dizionario."""
+    if not _HAS_QGIS:
+        raise VertoError(
+            "Ambiente QGIS non disponibile: impossibile contattare il "
+            "servizio IGM."
+        )
+    body = json.dumps(payload).encode("utf-8")
+    request = QNetworkRequest(QUrl(url))
+    request.setHeader(
+        QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json"
+    )
+    blocking = QgsBlockingNetworkRequest()
+    err = blocking.post(request, QByteArray(body), True)
+    if err != QgsBlockingNetworkRequest.ErrorCode.NoError:
+        raise VertoError(
+            "Errore di rete: {}".format(blocking.errorMessage() or err)
+        )
+    reply = blocking.reply()
+    raw = bytes(reply.content())
+    if not raw:
+        raise VertoError("Risposta vuota dal server IGM.")
+    return _parse_json(raw.decode("utf-8", "replace"))
 
 
 def get_info(endpoint=ENDPOINT):
@@ -138,24 +130,15 @@ def _convert_chunk(in_epsg, out_epsg, coords, utente, chiave, endpoint):
     return out
 
 
-def convert(
-    in_epsg,
-    out_epsg,
-    coords,
-    utente="qgis",
-    chiave="qgis",
-    endpoint=ENDPOINT,
-    max_coord=DEFAULT_MAX_COORD,
-    progress_cb=None,
-):
+def convert(in_epsg, out_epsg, coords, utente="qgis", chiave="qgis",
+            endpoint=ENDPOINT, max_coord=DEFAULT_MAX_COORD, progress_cb=None):
     """
     Converte una lista di coordinate.
 
-    coords: lista di tuple (e, n) -> (est/longitudine, nord/latitudine)
+    coords: lista di tuple (e, n) -> (est/longitudine, nord/latitudine).
             Per le coordinate geografiche usare gradi sessadecimali.
     Ritorna: lista di tuple (e, n) convertite, nello stesso ordine.
-
-    progress_cb(done, total): callback opzionale per la barra di avanzamento.
+    progress_cb(done, total): callback opzionale di avanzamento.
     """
     if int(in_epsg) == int(out_epsg):
         raise VertoError(

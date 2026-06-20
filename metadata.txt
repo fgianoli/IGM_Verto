@@ -1,21 +1,34 @@
+# This file contains metadata for your plugin.
+
 [general]
 name=IGM Verto Coordinate Converter
 qgisMinimumVersion=3.16
 qgisMaximumVersion=4.99
-supportsQt6=True
-description=[EN] Coordinate conversion using the official IGM grids (Verto on line API). [IT] Conversione di coordinate con i grigliati ufficiali IGM (API Verto on line).
-about=[EN] Plugin for QGIS 3 and 4 that converts coordinates using the IGM "Verto on line" REST API (official national grids), more accurate than standard PROJ transformations between Italian datums (Monte Mario/Roma40, ED50, IGM95, ETRS89/RDN2008). Features: reproject vector layers, manual coordinate conversion, batch conversion from CSV, map-click tool and a Processing algorithm. Requires an internet connection.
-    [IT] Plugin per QGIS 3 e 4 che converte coordinate usando l'API REST "Verto on line" dell'IGM (grigliati nazionali ufficiali), piu' precisa delle trasformazioni PROJ standard tra i datum italiani (Monte Mario/Roma40, ED50, IGM95, ETRS89/RDN2008). Funzionalita': riproiezione di layer vettoriali, conversione manuale di coordinate, conversione batch da file CSV, strumento di click sulla mappa e algoritmo Processing. Richiede una connessione internet.
-    Servizio IGM / IGM service: https://igmi.esercito.difesa.it/servizi/verto-online/
-version=1.1.0
-author=Federico
-email=fritz4@gmail.com
-tracker=https://igmi.esercito.difesa.it/servizi/verto-online/
-repository=https://igmi.esercito.difesa.it/servizi/verto-online/
-homepage=https://igmi.esercito.difesa.it/servizi/verto-online/
+description=Coordinate conversion using the official IGM grids (Verto online API) - Conversione coordinate con i grigliati ufficiali IGM (API Verto online).
+version=1.2.5
+author=Federico Gianoli
+email=gianoli.federico@gmail.com
+
+about=Plugin for QGIS 3 and 4 that converts coordinates using the IGM "Verto online" REST API (official Italian national grids), more accurate than standard PROJ transformations between Italian datums (Monte Mario/Roma40, ED50, IGM95, ETRS89/RDN2008). Features: reproject vector layers, manual coordinate conversion, batch conversion from CSV, map-click tool and a Processing algorithm. Requires an internet connection. --- Plugin per QGIS 3 e 4 che converte coordinate usando l'API REST "Verto online" dell'IGM (grigliati nazionali ufficiali), piu' precisa delle trasformazioni PROJ standard tra i datum italiani (Monte Mario/Roma40, ED50, IGM95, ETRS89/RDN2008). Funzioni: riproiezione di layer vettoriali, conversione manuale, conversione batch da CSV, strumento di click sulla mappa e algoritmo Processing. Richiede una connessione internet. Servizio IGM: https://igmi.esercito.difesa.it/servizi/verto-online/
+
+tracker=https://github.com/fgianoli/IGM_Verto/issues
+repository=https://github.com/fgianoli/IGM_Verto
+homepage=https://github.com/fgianoli/IGM_Verto
+
+changelog=
+    1.2.5 - Fix risposta server con righe di log (parsing JSON robusto, blocchi da 32000); preservazione quota Z nella riproiezione; conversione layer/cartella in background (QgsTask) con finestra di progresso annullabile; messaggio chiaro quando origine/destinazione hanno lo stesso datum (non supportato dal servizio)
+    1.2.4 - Pulizia codice (Flake8): risolti W503/W504
+    1.2.3 - Pulizia codice (Flake8): rimosso import inutilizzato e statement multipli
+    1.2.2 - Rimosso flag di metadati deprecato; compatibilità QGIS 4 dichiarata via qgisMaximumVersion
+    1.2.1 - Sicurezza: richieste di rete solo via QgsBlockingNetworkRequest (risolto avviso Bandit B310)
+    1.2.0 - Fix interfaccia utente
+    1.1.0 - Toolbar con icona singola e menu a tendina, icone distinte, sezione Guida in italiano, metadati bilingue EN/IT, condizioni d'uso IGM
+    1.0.0 - Prima versione: conversione manuale/CSV/layer, click su mappa, algoritmo Processing
+
+tags=igm,coordinate,conversione,riproiezione,grigliati,verto,italia,datum,epsg,reproject
 category=Vector
 icon=icon.svg
-tags=igm,coordinate,conversione,riproiezione,grigliati,verto,italia,datum,epsg,reproject
 experimental=False
 deprecated=False
 hasProcessingProvider=yes
+server=False

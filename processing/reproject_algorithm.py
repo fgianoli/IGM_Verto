@@ -97,10 +97,8 @@ class VertoReprojectAlgorithm(QgsProcessingAlgorithm):
             raise QgsProcessingException(
                 "CRS di origine e destinazione coincidono.")
 
-        utente = (self.parameterAsString(parameters, self.UTENTE, context)
-                  or settings.get_utente())
-        chiave = (self.parameterAsString(parameters, self.CHIAVE, context)
-                  or settings.get_chiave())
+        utente = self.parameterAsString(parameters, self.UTENTE, context) or settings.get_utente()
+        chiave = self.parameterAsString(parameters, self.CHIAVE, context) or settings.get_chiave()
 
         (sink, dest_id) = self.parameterAsSink(
             parameters, self.OUTPUT, context,

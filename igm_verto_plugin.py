@@ -7,7 +7,7 @@ from qgis.PyQt.QtCore import QCoreApplication
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction, QMenu, QToolButton
 
-from qgis.core import QgsApplication
+from qgis.core import QgsApplication, QgsMessageLog, Qgis
 
 PLUGIN_DIR = os.path.dirname(__file__)
 
@@ -108,7 +108,6 @@ class IgmVertoPlugin(object):
             self.provider = VertoProcessingProvider()
             QgsApplication.processingRegistry().addProvider(self.provider)
         except Exception as exc:  # pragma: no cover
-            from qgis.core import QgsMessageLog, Qgis
             QgsMessageLog.logMessage(
                 "Impossibile registrare il provider Processing: {}".format(exc),
                 "IGM Verto", Qgis.MessageLevel.Warning,
@@ -118,13 +117,17 @@ class IgmVertoPlugin(object):
         for action in self.actions:
             try:
                 self.iface.removePluginMenu(self.menu_name, action)
-            except Exception:
-                pass
+            except Exception as exc:
+                QgsMessageLog.logMessage(
+                    "removePluginMenu: {}".format(exc), "IGM Verto",
+                    Qgis.MessageLevel.Info)
         if self.map_tool is not None:
             try:
                 self.iface.mapCanvas().unsetMapTool(self.map_tool)
-            except Exception:
-                pass
+            except Exception as exc:
+                QgsMessageLog.logMessage(
+                    "unsetMapTool: {}".format(exc), "IGM Verto",
+                    Qgis.MessageLevel.Info)
             self.map_tool = None
         if self.menu is not None:
             self.menu.deleteLater()
