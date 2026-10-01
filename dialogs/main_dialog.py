@@ -151,6 +151,14 @@ class MainDialog(QDialog):
             raise ValueError("servono due valori (E e N)")
         return float(parts[0]), float(parts[1])
 
+    def _alias_notice(self, *epsgs):
+        """Mostra (una volta per apertura della finestra) come viene gestito
+        un EPSG non supportato direttamente dal servizio."""
+        note = verto_api.alias_notice(*epsgs)
+        if note and not getattr(self, "_alias_shown", False):
+            self._alias_shown = True
+            QMessageBox.information(self, "IGM Verto - Nota sul sistema scelto", note)
+
     def _manual_convert(self):
         in_epsg = self.m_in.current_epsg()
         out_epsg = self.m_out.current_epsg()
@@ -162,6 +170,7 @@ class MainDialog(QDialog):
                 self, "IGM Verto",
                 _SAME_DATUM_MSG.format(converter.datum_of(in_epsg)))
             return
+        self._alias_notice(in_epsg, out_epsg)
         coords = []
         for i, line in enumerate(self.m_input.toPlainText().splitlines(), 1):
             if not line.strip():
@@ -288,6 +297,7 @@ class MainDialog(QDialog):
                 self, "IGM Verto",
                 _SAME_DATUM_MSG.format(converter.datum_of(in_epsg)))
             return
+        self._alias_notice(in_epsg, out_epsg)
 
         delim = self._csv_delimiter()
         ci = self.c_col_e.value() - 1
@@ -580,6 +590,7 @@ class MainDialog(QDialog):
                 self, "IGM Verto",
                 _SAME_DATUM_MSG.format(converter.datum_of(in_epsg)))
             return
+        self._alias_notice(in_epsg, out_epsg)
         sel = self.l_selected.isChecked()
         if sel and layer.selectedFeatureCount() == 0:
             QMessageBox.warning(self, "IGM Verto", "Nessun elemento selezionato.")
@@ -656,6 +667,7 @@ class MainDialog(QDialog):
             QMessageBox.warning(self, "IGM Verto",
                                 "Seleziona il sistema di destinazione.")
             return
+        self._alias_notice(out_epsg)
         fallback_in = self.l_in.current_epsg()
         ext = self._out_ext()
         files = converter.list_vector_files(in_dir, self.l_recursive.isChecked())

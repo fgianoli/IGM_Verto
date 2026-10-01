@@ -99,6 +99,13 @@ QGIS).</p>
 (EPSG:4265, 3003, 3004, 4806), ED50 (4230, 23032/33/34), IGM95 (4670, 3064,
 3065, 9716), ETRS89-LAEA/LCC (3035, 3034) e RDN2008 (6706, 6707, 6708, 6709,
 7794, 6876).</p>
+<p><b>EPSG:7795</b> (RDN2008 / Zone 12, E-N) non &egrave; ancora supportato
+direttamente dal servizio IGM: il plugin lo gestisce <b>inoltrando la richiesta
+come EPSG:6876</b>, che ha gli stessi parametri di proiezione (meridiano
+centrale 12&deg;E, falso est 3.000.000 m) e differisce solo per l'ordine degli
+assi. Il servizio restituisce sempre (Est, Nord), quindi il risultato &egrave;
+nell'ordine E-N proprio del 7795. Se l'IGM aggiunger&agrave; il 7795 al suo
+elenco, il plugin lo user&agrave; direttamente.</p>
 </body></html>
 """
 

@@ -66,10 +66,10 @@ class VertoReprojectAlgorithm(QgsProcessingAlgorithm):
             self.TARGET_CRS, self.tr("CRS di destinazione"),
             defaultValue="EPSG:6706"))
         self.addParameter(QgsProcessingParameterString(
-            self.UTENTE, self.tr("Utente (opzionale)"),
+            self.UTENTE, self.tr("Utente IGM (opzionale)"),
             defaultValue=settings.get_utente(), optional=True))
         self.addParameter(QgsProcessingParameterString(
-            self.CHIAVE, self.tr("Chiave (opzionale)"),
+            self.CHIAVE, self.tr("Chiave IGM (opzionale)"),
             defaultValue=settings.get_chiave(), optional=True))
         self.addParameter(QgsProcessingParameterFeatureSink(
             self.OUTPUT, self.tr("Layer convertito")))
@@ -109,6 +109,9 @@ class VertoReprojectAlgorithm(QgsProcessingAlgorithm):
 
         features = list(source.getFeatures())
         geoms = [f.geometry() for f in features]
+        _note = verto_api.alias_notice(in_epsg, out_epsg)
+        if _note:
+            feedback.pushWarning(_note)
         feedback.pushInfo(
             "Conversione di {} elementi (EPSG:{} -> EPSG:{}) via IGM Verto..."
             .format(len(features), in_epsg, out_epsg))

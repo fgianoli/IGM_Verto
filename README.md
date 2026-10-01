@@ -28,6 +28,12 @@ Monte Mario (EPSG:4265, 3003, 3004, 4806), ED50 (4230, 23032/33/34),
 IGM95 (4670, 3064, 3065, 9716), ETRS89-LAEA/LCC (3035, 3034),
 RDN2008 (6706, 6707, 6708, 6709, 7794, 6876).
 
+> **EPSG:7795** (RDN2008 / Zone 12, E-N) non è supportato direttamente dal
+> servizio IGM. Il plugin lo gestisce inoltrando la richiesta come **EPSG:6876**
+> (stessi parametri di proiezione, cambia solo l'ordine degli assi: N-E vs E-N).
+> Il servizio restituisce sempre (Est, Nord), quindi il risultato è in ordine
+> E-N come previsto dal 7795. L'interfaccia mostra un avviso quando lo si usa.
+
 > Nota: le conversioni nello **stesso datum** non sono supportate dal servizio
 > (es. da "RDN2008 2D geo" a "RDN2008 / TM32").
 

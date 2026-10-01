@@ -15,7 +15,7 @@ def _s():
 
 
 def get_utente():
-    return _s().value(_PREFIX + "utente", "qgis", type=str)
+    return _s().value(_PREFIX + "utente", verto_api.DEFAULT_USER, type=str)
 
 
 def set_utente(value):
@@ -23,11 +23,17 @@ def set_utente(value):
 
 
 def get_chiave():
-    return _s().value(_PREFIX + "chiave", "qgis", type=str)
+    return _s().value(_PREFIX + "chiave", verto_api.DEFAULT_KEY, type=str)
 
 
 def set_chiave(value):
     _s().setValue(_PREFIX + "chiave", value)
+
+
+def has_personal_credentials():
+    """True se l'utente ha impostato credenziali diverse dai segnaposto."""
+    return (get_utente() != verto_api.DEFAULT_USER
+            and get_chiave() != verto_api.DEFAULT_KEY)
 
 
 def get_endpoint():

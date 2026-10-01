@@ -5,7 +5,7 @@ name=IGM Verto Coordinate Converter
 qgisMinimumVersion=3.16
 qgisMaximumVersion=4.99
 description=Coordinate conversion using the official IGM grids (Verto online API) - Conversione coordinate con i grigliati ufficiali IGM (API Verto online).
-version=1.2.5
+version=1.3.1
 author=Federico Gianoli
 email=gianoli.federico@gmail.com
 
@@ -16,6 +16,8 @@ repository=https://github.com/fgianoli/IGM_Verto
 homepage=https://github.com/fgianoli/IGM_Verto
 
 changelog=
+    1.3.1 - Aggiunto EPSG:7795 (RDN2008 / Zone 12, E-N, richiesto da Regione Veneto): non e' ancora supportato dal servizio IGM, viene inoltrato come EPSG:6876 (stessi parametri, cambia solo l'ordine degli assi), con avviso esplicativo nell'interfaccia, nell'etichetta del menu, nella guida e nel log Processing
+    1.3.0 - Preparazione al controllo utente+chiave IGM (attivo dal 2026): impostazioni con link a "Abbonamenti ai servizi", chiave mascherata, messaggio guidato se le credenziali sono rifiutate o scadute (validita' trimestrale)
     1.2.5 - Fix risposta server con righe di log (parsing JSON robusto, blocchi da 32000); preservazione quota Z nella riproiezione; conversione layer/cartella in background (QgsTask) con finestra di progresso annullabile; messaggio chiaro quando origine/destinazione hanno lo stesso datum (non supportato dal servizio)
     1.2.4 - Pulizia codice (Flake8): risolti W503/W504
     1.2.3 - Pulizia codice (Flake8): rimosso import inutilizzato e statement multipli

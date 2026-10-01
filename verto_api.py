@@ -34,6 +34,60 @@ except Exception:  # pragma: no cover - fuori da QGIS
     _HAS_QGIS = False
 
 
+DEFAULT_USER = "qgis"
+DEFAULT_KEY = "qgis"
+CREDENTIALS_URL = "https://igmi.esercito.difesa.it/servizi/verto-online/"
+
+# SRS non elencati dal servizio IGM ma ottenibili tramite un equivalente
+# supportato: EPSG:7795 (RDN2008 / Zone 12, E-N) ha gli stessi parametri di
+# EPSG:6876 (N-E) e differisce solo per l'ordine degli assi; il servizio
+# restituisce comunque sempre (est, nord). Il plugin lo inoltra come 6876.
+SERVER_ALIAS = {7795: 6876}
+EXTRA_SRS = [{"epsg": 7795, "descrizione": "RDN2008 / Zone 12 (E-N)"}]
+
+
+def to_server_epsg(epsg):
+    """Codice EPSG da inviare al servizio (risolve gli alias)."""
+    return SERVER_ALIAS.get(int(epsg), int(epsg))
+
+
+ALIAS_NOTE = (
+    "EPSG:{alias} non e' supportato direttamente dal servizio IGM Verto. "
+    "Il plugin esegue la conversione verso/da EPSG:{real}, che ha gli stessi "
+    "parametri di proiezione (RDN2008 / Zone 12, meridiano centrale 12\u00b0E, "
+    "falso est 3.000.000 m) e differisce solo per l'ordine degli assi "
+    "(N-E invece di E-N). Le coordinate sono restituite sempre come "
+    "(Est, Nord), cioe' nell'ordine E-N proprio dell'EPSG:{alias}. "
+    "Il risultato e' quindi quello del grigliato IGM per l'EPSG:{real}."
+)
+
+
+def alias_notice(*epsgs):
+    """Testo dell'avviso se tra gli EPSG c'e' un alias, altrimenti None."""
+    notes = []
+    for e in epsgs:
+        try:
+            e = int(e)
+        except (TypeError, ValueError):
+            continue
+        if e in SERVER_ALIAS:
+            notes.append(ALIAS_NOTE.format(alias=e, real=SERVER_ALIAS[e]))
+    return "\n\n".join(dict.fromkeys(notes)) or None
+
+
+def with_extra_srs(srs_list):
+    """Aggiunge all'elenco del servizio gli SRS gestiti via alias."""
+    known = {int(x["epsg"]) for x in srs_list}
+    return list(srs_list) + [x for x in EXTRA_SRS if x["epsg"] not in known]
+
+
+# Parole chiave che indicano un rifiuto per credenziali (il formato esatto
+# dell'errore di autenticazione IGM non e' ancora documentato).
+_AUTH_HINTS = ("utente", "chiave", "credenzial", "autentic", "autoriz",
+               "scadut", "scadenz", "abbonament", "unauthorized",
+               "forbidden", "key", "expired")
+
+
 class VertoError(Exception):
     """Errore restituito dall'API o errore di rete."""
 
@@ -46,6 +100,24 @@ class VertoError(Exception):
         if self.dove:
             return "{} ({})".format(self.message, self.dove)
         return self.message
+
+
+class VertoAuthError(VertoError):
+    """Credenziali (utente/chiave) mancanti, non valide o scadute."""
+
+
+def _auth_error(message, dove=None):
+    return VertoAuthError(
+        "Credenziali IGM non accettate: {}. Le chiavi hanno validita' "
+        "trimestrale: accedi al sito IGM, apri 'Abbonamenti ai servizi' e "
+        "aggiorna utente/chiave in Impostazioni del plugin.".format(message),
+        dove,
+    )
+
+
+def _looks_like_auth_error(message):
+    low = (message or "").lower()
+    return any(h in low for h in _AUTH_HINTS)
 
 
 def _parse_json(text):
@@ -85,6 +157,10 @@ def _http_post_json(url, payload, timeout_ms=TIMEOUT_MS):
     blocking = QgsBlockingNetworkRequest()
     err = blocking.post(request, QByteArray(body), True)
     if err != QgsBlockingNetworkRequest.ErrorCode.NoError:
+        status = blocking.reply().attribute(
+            QNetworkRequest.Attribute.HttpStatusCodeAttribute)
+        if status in (401, 403):
+            raise _auth_error("HTTP {}".format(status))
         raise VertoError(
             "Errore di rete: {}".format(blocking.errorMessage() or err)
         )
@@ -101,7 +177,7 @@ def get_info(endpoint=ENDPOINT):
     if data.get("stato") == "errore":
         raise VertoError(data.get("messaggio", "Errore"), data.get("dove"))
     max_coord = int(data.get("maxCoord", DEFAULT_MAX_COORD))
-    srs = data.get("srsSupportati", [])
+    srs = with_extra_srs(data.get("srsSupportati", []))
     return max_coord, srs
 
 
@@ -110,15 +186,16 @@ def _convert_chunk(in_epsg, out_epsg, coords, utente, chiave, endpoint):
         "richiesta": "conversione",
         "utente": utente,
         "chiave": chiave,
-        "inEpsg": int(in_epsg),
-        "outEpsg": int(out_epsg),
+        "inEpsg": to_server_epsg(in_epsg),
+        "outEpsg": to_server_epsg(out_epsg),
         "coordinate": [{"e": float(e), "n": float(n)} for (e, n) in coords],
     }
     data = _http_post_json(endpoint, payload)
     if data.get("stato") != "successo":
-        raise VertoError(
-            data.get("messaggio", "Errore di conversione"), data.get("dove")
-        )
+        msg = data.get("messaggio", "Errore di conversione")
+        if _looks_like_auth_error(msg):
+            raise _auth_error(msg, data.get("dove"))
+        raise VertoError(msg, data.get("dove"))
     out = []
     for item in data.get("coordinate", []):
         out.append((item.get("e"), item.get("n")))
@@ -130,7 +207,7 @@ def _convert_chunk(in_epsg, out_epsg, coords, utente, chiave, endpoint):
     return out
 
 
-def convert(in_epsg, out_epsg, coords, utente="qgis", chiave="qgis",
+def convert(in_epsg, out_epsg, coords, utente=DEFAULT_USER, chiave=DEFAULT_KEY,
             endpoint=ENDPOINT, max_coord=DEFAULT_MAX_COORD, progress_cb=None):
     """
     Converte una lista di coordinate.
@@ -140,7 +217,7 @@ def convert(in_epsg, out_epsg, coords, utente="qgis", chiave="qgis",
     Ritorna: lista di tuple (e, n) convertite, nello stesso ordine.
     progress_cb(done, total): callback opzionale di avanzamento.
     """
-    if int(in_epsg) == int(out_epsg):
+    if to_server_epsg(in_epsg) == to_server_epsg(out_epsg):
         raise VertoError(
             "Sistema di origine e destinazione coincidono (EPSG:{}). "
             "Le conversioni nello stesso datum non sono supportate.".format(in_epsg)

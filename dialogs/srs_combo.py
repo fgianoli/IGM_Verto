@@ -5,7 +5,10 @@ from qgis.PyQt.QtWidgets import (
     QComboBox, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
 )
 
+from qgis.PyQt.QtCore import Qt
+
 from .. import settings
+from .. import verto_api
 
 
 class SrsComboBox(QComboBox):
@@ -26,6 +29,12 @@ class SrsComboBox(QComboBox):
                 continue
             label = "EPSG:{} - {}".format(epsg, srs.get("descrizione", ""))
             self.addItem(label, epsg)
+            note = verto_api.alias_notice(epsg)
+            if note:
+                idx = self.count() - 1
+                self.setItemText(idx, label + " [via EPSG:{}]".format(
+                    verto_api.SERVER_ALIAS[int(epsg)]))
+                self.setItemData(idx, note, Qt.ItemDataRole.ToolTipRole)
         if current is not None:
             self.set_current_epsg(current)
 
