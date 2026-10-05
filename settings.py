@@ -84,12 +84,12 @@ FALLBACK_SRS = [
     {"epsg": 9716, "descrizione": "IGM95 / UTM zone 34N"},
     {"epsg": 3035, "descrizione": "ETRS89 / ETRS-LAEA"},
     {"epsg": 3034, "descrizione": "ETRS89 / ETRS-LCC"},
-    {"epsg": 6706, "descrizione": "RDN2008 2D geo"},
-    {"epsg": 6707, "descrizione": "RDN2008 / TM32"},
-    {"epsg": 6708, "descrizione": "RDN2008 / TM33"},
-    {"epsg": 6709, "descrizione": "RDN2008 / TM34"},
-    {"epsg": 7794, "descrizione": "RDN2008 / Italy Zone EN"},
-    {"epsg": 6876, "descrizione": "RDN2008 / Zone 12"},
+    {"epsg": 6706, "descrizione": "RDN2008 2D (geo)"},
+    {"epsg": 7791, "descrizione": "RDN2008 / UTM zone 32N (E-N)"},
+    {"epsg": 7792, "descrizione": "RDN2008 / UTM zone 33N (E-N)"},
+    {"epsg": 7793, "descrizione": "RDN2008 / UTM zone 34N (E-N)"},
+    {"epsg": 7794, "descrizione": "RDN2008 / Italy Zone (E-N)"},
+    {"epsg": 7795, "descrizione": "RDN2008 / Zone 12 (E-N)"},
 ]
 
 
@@ -102,7 +102,7 @@ def load_srs(force_refresh=False):
     if not force_refresh:
         cached = get_cached_srs()
         if cached:
-            return get_max_coord(), cached
+            return get_max_coord(), verto_api.with_extra_srs(cached)
     try:
         max_coord, srs = verto_api.get_info(get_endpoint())
         if srs:
@@ -113,5 +113,5 @@ def load_srs(force_refresh=False):
         pass
     cached = get_cached_srs()
     if cached:
-        return get_max_coord(), cached
+        return get_max_coord(), verto_api.with_extra_srs(cached)
     return verto_api.DEFAULT_MAX_COORD, list(FALLBACK_SRS)

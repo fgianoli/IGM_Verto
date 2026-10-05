@@ -20,7 +20,12 @@ from . import verto_api
 
 
 def crs_to_epsg(crs):
-    """Restituisce il codice EPSG (int) di un QgsCoordinateReferenceSystem, o None."""
+    """Restituisce il codice EPSG (int) di un QgsCoordinateReferenceSystem, o None.
+
+    Se il CRS non ha un codice EPSG (tipico dei file scaricati da geoportali
+    regionali, il cui .prj porta un SR "personalizzato"), prova a riconoscerlo
+    dai parametri di proiezione: vedi match_epsg_by_params().
+    """
     if crs is None or not crs.isValid():
         return None
     auth = crs.authid()  # es. "EPSG:3003"
@@ -30,7 +35,81 @@ def crs_to_epsg(crs):
         except (ValueError, IndexError):
             return None
     pg = crs.postgisSrid()
-    return int(pg) if pg else None
+    if pg:
+        return int(pg)
+    return _guess_epsg_from_custom_crs(crs)
+
+
+# --- Riconoscimento di CRS personalizzati equivalenti a un EPSG supportato ---
+
+_KEY_PARAMS = ("proj", "zone", "lat_0", "lon_0", "k", "x_0", "y_0", "ellps", "units")
+_NUMERIC_DEFAULTS = {"lat_0": 0.0, "lon_0": 0.0, "k": 1.0, "x_0": 0.0, "y_0": 0.0}
+
+
+def proj_key(proj_string):
+    """Chiave normalizzata dei parametri di proiezione di una stringa PROJ.
+
+    Restituisce None per CRS non proiettati (geografici), che non si possono
+    distinguere in modo affidabile (es. IGM95 / RDN2008 / ETRS89).
+    """
+    params = {}
+    for tok in (proj_string or "").split():
+        if tok.startswith("+") and "=" in tok:
+            k, v = tok[1:].split("=", 1)
+            params[k] = v
+    if params.get("proj") in (None, "longlat", "latlong"):
+        return None
+    if "k_0" in params and "k" not in params:
+        params["k"] = params["k_0"]
+    key = []
+    for name in _KEY_PARAMS:
+        val = params.get(name)
+        if name in _NUMERIC_DEFAULTS:
+            try:
+                val = round(float(val), 6) if val is not None else _NUMERIC_DEFAULTS[name]
+            except ValueError:
+                return None
+        elif name == "units":
+            val = val or "m"
+        key.append(val)
+    return tuple(key)
+
+
+def match_epsg_by_params(custom_key, candidates):
+    """candidates: dict {epsg: chiave}. Ritorna l'EPSG se la corrispondenza e'
+    univoca (i codici legacy N-E e i nuovi E-N contano come uno: stessi parametri),
+    altrimenti None."""
+    if custom_key is None:
+        return None
+    hits = {e for e, k in candidates.items() if k == custom_key}
+    hits = {verto_api.to_server_epsg(e) for e in hits}
+    return hits.pop() if len(hits) == 1 else None
+
+
+def _crs_proj(crs):
+    for name in ("toProj", "toProj4"):
+        fn = getattr(crs, name, None)
+        if fn:
+            try:
+                return fn()
+            except Exception:  # pragma: no cover
+                continue
+    return ""
+
+
+def _guess_epsg_from_custom_crs(crs):
+    key = proj_key(_crs_proj(crs))
+    if key is None:
+        return None
+    candidates = {}
+    for codes in DATUM_FAMILIES.values():
+        for code in codes:
+            c = QgsCoordinateReferenceSystem.fromEpsgId(int(code))
+            if c.isValid():
+                k = proj_key(_crs_proj(c))
+                if k is not None:
+                    candidates[code] = k
+    return match_epsg_by_params(key, candidates)
 
 
 def epsg_to_crs(epsg):
@@ -44,7 +123,8 @@ DATUM_FAMILIES = {
     "Monte Mario / Roma40": {4265, 3003, 3004, 4806},
     "ED50": {4230, 23032, 23033, 23034},
     "IGM95": {4670, 3064, 3065, 9716},
-    "RDN2008 / ETRS89": {6706, 6707, 6708, 6709, 7794, 6876, 7795, 3035, 3034},
+    "RDN2008 / ETRS89": {6706, 6707, 6708, 6709, 6876, 7791, 7792, 7793,
+                         7794, 7795, 3035, 3034},
 }
 
 

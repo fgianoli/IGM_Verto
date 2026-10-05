@@ -26,13 +26,15 @@ Richiede connessione internet.
 L'elenco viene letto dal server (richiesta `info`) e include, tra gli altri:
 Monte Mario (EPSG:4265, 3003, 3004, 4806), ED50 (4230, 23032/33/34),
 IGM95 (4670, 3064, 3065, 9716), ETRS89-LAEA/LCC (3035, 3034),
-RDN2008 (6706, 6707, 6708, 6709, 7794, 6876).
+RDN2008 (6706, 7791, 7792, 7793, 7794, 7795).
 
-> **EPSG:7795** (RDN2008 / Zone 12, E-N) non è supportato direttamente dal
-> servizio IGM. Il plugin lo gestisce inoltrando la richiesta come **EPSG:6876**
-> (stessi parametri di proiezione, cambia solo l'ordine degli assi: N-E vs E-N).
-> Il servizio restituisce sempre (Est, Nord), quindi il risultato è in ordine
-> E-N come previsto dal 7795. L'interfaccia mostra un avviso quando lo si usa.
+> Dall'ottobre 2026 l'IGM offre gli RDN2008 proiettati solo con assi E-N
+> (**7791, 7792, 7793, 7794, 7795**). I vecchi codici N-E (**6876, 6707, 6708,
+> 6709**), presenti in molti file dei geoportali regionali, sono accettati e
+> inoltrati al servizio con il codice E-N equivalente (stessi parametri, cambia
+> solo l'ordine degli assi); l'interfaccia mostra un avviso. I CRS
+> "personalizzati" con parametri identici a un EPSG supportato sono
+> riconosciuti automaticamente.
 
 > Nota: le conversioni nello **stesso datum** non sono supportate dal servizio
 > (es. da "RDN2008 2D geo" a "RDN2008 / TM32").

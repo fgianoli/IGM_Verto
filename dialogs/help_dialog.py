@@ -97,15 +97,15 @@ QGIS).</p>
 <h3 style="color:#0b6e4f;">Sistemi di riferimento supportati</h3>
 <p>L'elenco viene letto dal server e comprende, tra gli altri: Monte Mario
 (EPSG:4265, 3003, 3004, 4806), ED50 (4230, 23032/33/34), IGM95 (4670, 3064,
-3065, 9716), ETRS89-LAEA/LCC (3035, 3034) e RDN2008 (6706, 6707, 6708, 6709,
-7794, 6876).</p>
-<p><b>EPSG:7795</b> (RDN2008 / Zone 12, E-N) non &egrave; ancora supportato
-direttamente dal servizio IGM: il plugin lo gestisce <b>inoltrando la richiesta
-come EPSG:6876</b>, che ha gli stessi parametri di proiezione (meridiano
-centrale 12&deg;E, falso est 3.000.000 m) e differisce solo per l'ordine degli
-assi. Il servizio restituisce sempre (Est, Nord), quindi il risultato &egrave;
-nell'ordine E-N proprio del 7795. Se l'IGM aggiunger&agrave; il 7795 al suo
-elenco, il plugin lo user&agrave; direttamente.</p>
+3065, 9716), ETRS89-LAEA/LCC (3035, 3034) e RDN2008 (6706, 7791-7795).</p>
+<p>Dall'ottobre 2026 l'IGM offre gli RDN2008 proiettati solo con assi E-N
+(<b>EPSG:7791, 7792, 7793, 7794, 7795</b>). I vecchi codici con assi N-E
+(<b>6876, 6707, 6708, 6709</b>), ancora presenti in molti file scaricati da
+geoportali regionali, restano utilizzabili: il plugin li <b>inoltra al servizio
+con il codice E-N equivalente</b> (stessi parametri di proiezione, cambia solo
+l'ordine degli assi) e mostra un avviso. I layer con sistema di riferimento
+&laquo;personalizzato&raquo; ma con parametri identici a un EPSG supportato
+sono riconosciuti automaticamente.</p>
 </body></html>
 """
 

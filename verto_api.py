@@ -38,12 +38,18 @@ DEFAULT_USER = "qgis"
 DEFAULT_KEY = "qgis"
 CREDENTIALS_URL = "https://igmi.esercito.difesa.it/servizi/verto-online/"
 
-# SRS non elencati dal servizio IGM ma ottenibili tramite un equivalente
-# supportato: EPSG:7795 (RDN2008 / Zone 12, E-N) ha gli stessi parametri di
-# EPSG:6876 (N-E) e differisce solo per l'ordine degli assi; il servizio
-# restituisce comunque sempre (est, nord). Il plugin lo inoltra come 6876.
-SERVER_ALIAS = {7795: 6876}
-EXTRA_SRS = [{"epsg": 7795, "descrizione": "RDN2008 / Zone 12 (E-N)"}]
+# Dal 2026-10 l'IGM ha sostituito i vecchi EPSG RDN2008 proiettati con assi
+# N-E (6876, 6707, 6708, 6709) con gli equivalenti E-N (7795, 7791, 7792,
+# 7793): stessi parametri di proiezione, cambia solo l'ordine degli assi.
+# I file scaricati da geoportali (es. Regione Veneto) portano ancora i vecchi
+# codici: il plugin li accetta e li inoltra al servizio con il codice nuovo.
+SERVER_ALIAS = {6876: 7795, 6707: 7791, 6708: 7792, 6709: 7793}
+EXTRA_SRS = [
+    {"epsg": 6876, "descrizione": "RDN2008 / Zone 12 (N-E)"},
+    {"epsg": 6707, "descrizione": "RDN2008 / UTM zone 32N (N-E)"},
+    {"epsg": 6708, "descrizione": "RDN2008 / UTM zone 33N (N-E)"},
+    {"epsg": 6709, "descrizione": "RDN2008 / UTM zone 34N (N-E)"},
+]
 
 
 def to_server_epsg(epsg):
@@ -52,13 +58,12 @@ def to_server_epsg(epsg):
 
 
 ALIAS_NOTE = (
-    "EPSG:{alias} non e' supportato direttamente dal servizio IGM Verto. "
-    "Il plugin esegue la conversione verso/da EPSG:{real}, che ha gli stessi "
-    "parametri di proiezione (RDN2008 / Zone 12, meridiano centrale 12\u00b0E, "
-    "falso est 3.000.000 m) e differisce solo per l'ordine degli assi "
-    "(N-E invece di E-N). Le coordinate sono restituite sempre come "
-    "(Est, Nord), cioe' nell'ordine E-N proprio dell'EPSG:{alias}. "
-    "Il risultato e' quindi quello del grigliato IGM per l'EPSG:{real}."
+    "EPSG:{alias} (assi N-E) non e' piu' elencato dal servizio IGM Verto, "
+    "che offre l'equivalente EPSG:{real} (assi E-N). Il plugin esegue la "
+    "conversione con EPSG:{real}: i parametri di proiezione sono gli stessi "
+    "e cambia solo l'ordine degli assi. Le coordinate sono usate e restituite "
+    "come (Est, Nord), come in QGIS. Il risultato e' quello del grigliato IGM "
+    "ufficiale."
 )
 
 
