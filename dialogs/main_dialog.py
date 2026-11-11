@@ -964,40 +964,41 @@ class MainDialog(QDialog):
             ok = 0
             errors = []
             outs = []
-            used = set()
-            total = len(files)
-            for i, f in enumerate(files):
+            # Un file puo' contenere piu' layer (es. GeoPackage): una voce
+            # per ciascun layer di ciascun file
+            jobs = converter.plan_batch(
+                [(f, converter.list_sublayers(f)) for f in files],
+                out_dir, out_epsg, ext)
+            total = len(jobs)
+            written = set()
+            for i, job in enumerate(jobs):
                 if task.isCanceled():
                     break
                 task.setProgress(i * 100.0 / total if total else 0)
-                base = "{}_EPSG{}".format(
-                    os.path.splitext(os.path.basename(f))[0], out_epsg)
-                # File omonimi in sottocartelle diverse: nomi distinti
-                out_path = os.path.join(out_dir, base + ext)
-                k = 2
-                while out_path.lower() in used:
-                    out_path = os.path.join(
-                        out_dir, "{}_{}{}".format(base, k, ext))
-                    k += 1
-                used.add(out_path.lower())
+                out_path = job["out_path"]
                 try:
                     converter.reproject_path_to_file(
-                        f, out_path, out_epsg, fallback_in_epsg=fallback_in,
-                        **api)
+                        job["in_path"], out_path, out_epsg,
+                        fallback_in_epsg=fallback_in,
+                        layer_uri=job["layer_uri"], out_layer=job["out_layer"],
+                        append=out_path in written, **api)
                     ok += 1
-                    outs.append(out_path)
+                    written.add(out_path)
+                    outs.append((out_path, job["out_layer"]))
                 except Exception as exc:
-                    errors.append("{}: {}".format(os.path.basename(f), exc))
-            return {"ok": ok, "errors": errors, "outs": outs, "total": total}
+                    errors.append("{}: {}".format(job["label"], exc))
+            return {"ok": ok, "errors": errors, "outs": outs, "total": total,
+                    "files": len(files)}
 
         def on_done():
             r = task.result
             if load:
-                for path in r["outs"]:
-                    self._add_file_to_project(path)
+                for path, lname in r["outs"]:
+                    self._add_file_to_project(path, lname)
             self.iface.messageBar().pushSuccess(
                 "IGM Verto",
-                "File convertiti: {}/{}".format(r["ok"], r["total"]))
+                "Layer convertiti: {}/{} (file letti: {})".format(
+                    r["ok"], r["total"], r["files"]))
             if r["errors"]:
                 QMessageBox.warning(
                     self, "IGM Verto",
@@ -1014,9 +1015,12 @@ class MainDialog(QDialog):
         task.taskTerminated.connect(on_failed)
         self._start_task(task, "Conversione batch avviata in background...")
 
-    def _add_file_to_project(self, path):
+    def _add_file_to_project(self, path, layer_name=None):
         from qgis.core import QgsVectorLayer
-        name = os.path.splitext(os.path.basename(path))[0]
-        layer = QgsVectorLayer(path, name, "ogr")
+        name = layer_name or os.path.splitext(os.path.basename(path))[0]
+        uri = path
+        if layer_name and path.lower().endswith(".gpkg"):
+            uri = "{}|layername={}".format(path, layer_name)
+        layer = QgsVectorLayer(uri, name, "ogr")
         if layer.isValid():
             QgsProject.instance().addMapLayer(layer)

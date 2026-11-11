@@ -207,7 +207,8 @@ SSL_HELP = (
 # l'identita' del server resta verificata (catena, nome host, impronta).
 # Qualsiasi altro errore o certificato viene rifiutato. Con il certificato
 # rinnovato la richiesta normale torna a funzionare e questo codice non serve.
-PINNED_EXPIRED_SHA1 = "a7c18ba99fc1f7afe3be20bcccab0e699fdfea7b"
+# (e' l'impronta pubblica di un certificato, non un segreto)
+PINNED_EXPIRED_SHA1 = "a7c18ba99fc1f7afe3be20bcccab0e699fdfea7b"  # pragma: allowlist secret
 # True dopo il primo ripiego riuscito: nella sessione si usa subito il client
 # diretto, evitando a ogni richiesta l'avviso "Certificato scaduto" di QGIS.
 _use_pinned = False

@@ -5,7 +5,7 @@ name=IGM Verto Coordinate Converter
 qgisMinimumVersion=3.16
 qgisMaximumVersion=4.99
 description=Coordinate conversion using the official IGM grids (Verto online API) - Conversione coordinate con i grigliati ufficiali IGM (API Verto online).
-version=1.4.3
+version=1.4.4
 author=Federico Gianoli
 email=gianoli.federico@gmail.com
 
@@ -16,6 +16,7 @@ repository=https://github.com/fgianoli/IGM_Verto
 homepage=https://github.com/fgianoli/IGM_Verto
 
 changelog=
+    1.4.4 - Cartella (batch): i file con piu' layer (es. GeoPackage) vengono convertiti per intero, non piu' solo il primo layer; in output un GeoPackage con tutti i layer oppure, negli altri formati, un file per layer; le tabelle senza geometria sono ignorate. Impostazioni: il plugin non scrive piu' i valori predefiniti ne' l'elenco SRS nel file QGIS3.ini/QGIS4.ini (restano solo utente, chiave ed endpoint se personalizzati; l'elenco SRS e' in un file nella cartella del plugin, eliminato con la disinstallazione); le chiavi lasciate dalle versioni precedenti vengono rimosse all'avvio; alla disinstallazione dal gestore plugin le impostazioni salvate vengono eliminate in automatico (anche con il nuovo pulsante "Rimuovi tutte le impostazioni salvate")
     1.4.3 - Certificato IGM scaduto: il plugin torna a funzionare senza intervento dell'utente. Se QGIS rifiuta la connessione, la richiesta viene ripetuta accettando solo l'errore "certificato scaduto" e solo per il certificato IGM noto (impronta fissata): catena, nome host e identita' del server restano verificati, ogni altro errore o certificato e' rifiutato. Quando l'IGM rinnova il certificato il ripiego non viene piu' usato. Rimossa l'opzione "Ignora errori del certificato SSL" introdotta nella 1.4.1: non serve piu' e disattivava ogni verifica
     1.4.2 - Revisione generale. Sicurezza: la chiave IGM non e' piu' proposta come valore predefinito nell'algoritmo Processing (restava in chiaro nella cronologia) ed e' salvata cifrata nel gestore di autenticazione di QGIS. Rete: blocchi da 5000 punti con due nuovi tentativi sugli errori di rete, coordinate ripetute inviate una sola volta, un solo tentativo per sessione di leggere l'elenco SRS a server irraggiungibile, cache dell'elenco rinnovata ogni settimana. CSV: virgola decimale accettata, righe saltate contate, pulsante Annulla funzionante, caricamento come punti anche senza intestazione. Altro: nomi di output unici nel batch con sottocartelle, messaggio chiaro se il CRS del progetto non e' gestito (click sulla mappa), controllo stesso datum in Processing, codici legacy nell'elenco di ripiego, compatibilita' enum QGIS 4 nel salvataggio su file
     1.4.1 - Certificato SSL del server IGM scaduto (7 novembre 2026): messaggio d'errore esplicito e nuova opzione in Impostazioni "Ignora errori del certificato SSL (non sicuro)", disattivata di default e con avviso, da usare solo finche' l'IGM non rinnova il certificato

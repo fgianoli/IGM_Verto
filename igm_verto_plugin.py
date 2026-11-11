@@ -2,6 +2,7 @@
 """Classe principale del plugin IGM Verto Coordinate Converter."""
 
 import os
+import sys
 
 from qgis.PyQt.QtCore import QCoreApplication
 from qgis.PyQt.QtGui import QIcon
@@ -10,6 +11,19 @@ from qgis.PyQt.QtWidgets import QAction, QMenu, QToolButton
 from qgis.core import QgsApplication, QgsMessageLog, Qgis
 
 PLUGIN_DIR = os.path.dirname(__file__)
+
+
+def _is_uninstalling():
+    """True se unload() e' stato chiamato dal gestore plugin di QGIS durante
+    una disinstallazione (e non per una disattivazione, un aggiornamento o la
+    chiusura di QGIS). QGIS non offre un segnale apposito: si riconosce la
+    funzione "uninstallPlugin" del gestore tra i chiamanti."""
+    frame = sys._getframe(1)
+    while frame is not None:
+        if frame.f_code.co_name == "uninstallPlugin":
+            return True
+        frame = frame.f_back
+    return False
 
 
 class IgmVertoPlugin(object):
@@ -51,6 +65,10 @@ class IgmVertoPlugin(object):
 
     # --------------------------------------------------------------- GUI init
     def initGui(self):  # noqa: N802
+        # Toglie dal file ini di QGIS cio' che le vecchie versioni vi scrivevano
+        from . import settings
+        settings.cleanup_legacy()
+
         self.toolbar = self.iface.addToolBar(self.menu_name)
         self.toolbar.setObjectName("IgmVertoToolbar")
 
@@ -114,6 +132,8 @@ class IgmVertoPlugin(object):
             )
 
     def unload(self):
+        if _is_uninstalling():
+            self._remove_saved_settings()
         for action in self.actions:
             try:
                 self.iface.removePluginMenu(self.menu_name, action)
@@ -142,6 +162,16 @@ class IgmVertoPlugin(object):
             QgsApplication.processingRegistry().removeProvider(self.provider)
             self.provider = None
         self.actions = []
+
+    def _remove_saved_settings(self):
+        """Disinstallazione: non lascia nulla nel file ini di QGIS."""
+        from . import settings
+        try:
+            settings.clear_all()
+        except Exception as exc:
+            QgsMessageLog.logMessage(
+                "Pulizia impostazioni: {}".format(exc), "IGM Verto",
+                Qgis.MessageLevel.Info)
 
     # ------------------------------------------------------------- callbacks
     def open_dialog(self):

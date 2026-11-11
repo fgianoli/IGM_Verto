@@ -50,6 +50,13 @@ class SettingsDialog(QDialog):
         refresh_row.addWidget(self.status_lbl, 1)
         layout.addLayout(refresh_row)
 
+        self.clear_btn = QPushButton("Rimuovi tutte le impostazioni salvate")
+        self.clear_btn.setToolTip(
+            "Elimina utente, chiave, endpoint ed elenco SRS salvati dal "
+            "plugin. Alla disinstallazione avviene in automatico.")
+        self.clear_btn.clicked.connect(self.clear_all)
+        layout.addWidget(self.clear_btn)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel)
         layout.addWidget(buttons)
@@ -82,6 +89,25 @@ class SettingsDialog(QDialog):
             "{} SRS aggiornati (max {} coord/richiesta).".format(
                 len(srs), max_coord)
         )
+
+    def clear_all(self):
+        answer = QMessageBox.question(
+            self, "IGM Verto",
+            "Eliminare utente, chiave, endpoint ed elenco SRS salvati dal "
+            "plugin? Se usi credenziali personali dovrai reinserirle.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            settings.clear_all()
+        except OSError as exc:
+            QMessageBox.warning(self, "IGM Verto", "Errore: {}".format(exc))
+            return
+        self.utente_edit.setText(verto_api.DEFAULT_USER)
+        self.chiave_edit.setText(verto_api.DEFAULT_KEY)
+        self.endpoint_edit.setText(verto_api.ENDPOINT)
+        self.status_lbl.setText("Impostazioni rimosse.")
 
     def save(self):
         settings.set_utente(self.utente_edit.text().strip() or verto_api.DEFAULT_USER)

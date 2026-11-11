@@ -324,8 +324,96 @@ def list_vector_files(folder, recursive=False):
     return sorted(out)
 
 
-def write_vector(layer, out_path):
-    """Scrive un QgsVectorLayer su file scegliendo il driver dall'estensione."""
+SUBLAYER_SEP = "!!::!!"
+_NO_GEOM = ("none", "nogeometry", "no geometry")
+
+
+def parse_sublayers(entries):
+    """Interpreta l'elenco dataProvider().subLayers() di un file OGR.
+
+    Ritorna [(nome_layer, tipo_geometria), ...] escludendo le tabelle senza
+    geometria (non c'e' nulla da riproiettare).
+    """
+    out = []
+    for entry in entries or []:
+        parts = entry.split(SUBLAYER_SEP)
+        if len(parts) < 2:
+            continue
+        gtype = parts[3] if len(parts) > 3 else ""
+        if gtype.strip().lower() in _NO_GEOM:
+            continue
+        out.append((parts[1], gtype))
+    return out
+
+
+def list_sublayers(path):
+    """Layer vettoriali contenuti in un file (un GeoPackage puo' averne molti)."""
+    from qgis.core import QgsVectorLayer
+    layer = QgsVectorLayer(path, os.path.basename(path), "ogr")
+    if not layer.isValid():
+        return []
+    return parse_sublayers(layer.dataProvider().subLayers())
+
+
+def _safe_name(text):
+    return "".join(c if (c.isalnum() or c in "-_ .") else "_"
+                   for c in text).strip() or "layer"
+
+
+def plan_batch(files_sublayers, out_dir, out_epsg, ext):
+    """Pianifica la conversione batch: una voce per ogni layer di ogni file.
+
+    files_sublayers: [(percorso, [(nome_layer, tipo_geometria), ...]), ...]
+    Ritorna una lista di dict con: in_path, layer_uri (suffisso da aggiungere
+    al percorso per aprire quel layer, "" per i file a layer singolo), label,
+    out_path, out_layer (nome del layer nel file di output, o None).
+    Un file con piu' layer produce un solo GeoPackage con tutti i layer,
+    oppure - negli altri formati - un file per layer. I nomi di output sono
+    resi unici (file omonimi in sottocartelle diverse).
+    """
+    used = set()
+
+    def unique(base):
+        path = os.path.join(out_dir, base + ext)
+        k = 2
+        while path.lower() in used:
+            path = os.path.join(out_dir, "{}_{}{}".format(base, k, ext))
+            k += 1
+        used.add(path.lower())
+        return path
+
+    jobs = []
+    for in_path, subs in files_sublayers:
+        fname = os.path.basename(in_path)
+        base = "{}_EPSG{}".format(os.path.splitext(fname)[0], out_epsg)
+        if len(subs) <= 1:
+            jobs.append({"in_path": in_path, "layer_uri": "", "label": fname,
+                         "out_path": unique(base), "out_layer": None})
+            continue
+        names = [n for n, _g in subs]
+        shared = unique(base) if ext == ".gpkg" else None
+        for name, gtype in subs:
+            uri = "|layername={}".format(name)
+            lname = name
+            if names.count(name) > 1 and gtype:
+                # stesso nome con piu' tipi di geometria
+                uri += "|geometrytype={}".format(gtype)
+                lname = "{}_{}".format(name, gtype)
+            jobs.append({
+                "in_path": in_path, "layer_uri": uri,
+                "label": "{} / {}".format(fname, lname),
+                "out_path": shared or unique(
+                    "{}_{}".format(base, _safe_name(lname))),
+                "out_layer": lname})
+    return jobs
+
+
+def write_vector(layer, out_path, layer_name=None, append=False):
+    """Scrive un QgsVectorLayer su file scegliendo il driver dall'estensione.
+
+    layer_name: nome del layer nel GeoPackage (predefinito: nome del file).
+    append: aggiunge il layer a un GeoPackage esistente invece di ricrearlo.
+    """
     from qgis.core import QgsVectorFileWriter, QgsProject
     ext = os.path.splitext(out_path)[1].lower()
     driver = _DRIVER_BY_EXT.get(ext, "GPKG")
@@ -333,7 +421,12 @@ def write_vector(layer, out_path):
     opts = QgsVectorFileWriter.SaveVectorOptions()
     opts.driverName = driver
     if ext == ".gpkg":
-        opts.layerName = os.path.splitext(os.path.basename(out_path))[0]
+        opts.layerName = (layer_name
+                          or os.path.splitext(os.path.basename(out_path))[0])
+        if append and os.path.exists(out_path):
+            actions = getattr(QgsVectorFileWriter, "ActionOnExistingFile",
+                              QgsVectorFileWriter)
+            opts.actionOnExistingFile = actions.CreateOrOverwriteLayer
     try:
         res = QgsVectorFileWriter.writeAsVectorFormatV3(layer, out_path, ctx, opts)
     except AttributeError:  # QGIS < 3.20
@@ -350,10 +443,12 @@ def write_vector(layer, out_path):
 
 
 def reproject_path_to_file(in_path, out_path, out_epsg, fallback_in_epsg=None,
+                           layer_uri="", out_layer=None, append=False,
                            **kwargs):
-    """Apre un file vettoriale, lo riproietta via IGM e lo salva su out_path."""
+    """Apre un file vettoriale (o uno dei suoi layer, con layer_uri), lo
+    riproietta via IGM e lo salva su out_path."""
     from qgis.core import QgsVectorLayer
-    layer = QgsVectorLayer(in_path, os.path.basename(in_path), "ogr")
+    layer = QgsVectorLayer(in_path + layer_uri, os.path.basename(in_path), "ogr")
     if not layer.isValid():
         raise verto_api.VertoError("Layer non valido: {}".format(in_path))
     in_epsg = crs_to_epsg(layer.crs()) or fallback_in_epsg
@@ -361,5 +456,5 @@ def reproject_path_to_file(in_path, out_path, out_epsg, fallback_in_epsg=None,
         raise verto_api.VertoError(
             "CRS non determinabile per {}".format(os.path.basename(in_path)))
     mem, n = reproject_layer_to_memory(layer, out_epsg, in_epsg=in_epsg, **kwargs)
-    write_vector(mem, out_path)
+    write_vector(mem, out_path, layer_name=out_layer, append=append)
     return n

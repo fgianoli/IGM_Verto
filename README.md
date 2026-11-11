@@ -62,6 +62,10 @@ RDN2008 (6706, 7791, 7792, 7793, 7794, 7795).
   32000 per richiesta, `maxCoord`); le coordinate ripetute sono inviate una sola volta e,
   in caso di errore di rete, il blocco viene ritentato due volte prima di interrompere.
 - L'elenco dei sistemi è tenuto in cache e rinnovato dal servizio dopo una settimana.
+- Nel file `QGIS3.ini`/`QGIS4.ini` il plugin scrive solo utente, chiave ed endpoint, e solo se diversi
+  dai predefiniti; l'elenco dei sistemi sta in `srs_cache.json` nella cartella del plugin. Alla
+  disinstallazione dal gestore plugin di QGIS il plugin elimina tutto ciò che ha salvato (lo stesso fa
+  *Impostazioni ▸ Rimuovi tutte le impostazioni salvate*).
 - Convenzione: `e` = est/longitudine (X), `n` = nord/latitudine (Y); le coordinate
   geografiche sono in **gradi sessadecimali**.
 - Compatibilità Qt5 (QGIS 3) e Qt6 (QGIS 4) tramite `qgis.PyQt` ed enum con scope.

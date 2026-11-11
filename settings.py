@@ -1,7 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Gestione delle impostazioni del plugin (credenziali, endpoint, cache SRS)."""
+"""Gestione delle impostazioni del plugin (credenziali, endpoint, cache SRS).
+
+Nel file di configurazione di QGIS (QGIS3.ini / QGIS4.ini) finiscono solo i
+valori che l'utente ha cambiato rispetto ai predefiniti. L'elenco dei sistemi
+in cache sta in un file nella cartella del plugin, che QGIS elimina con la
+disinstallazione. QGIS non avvisa i plugin quando vengono disinstallati: per
+rimuovere anche le impostazioni personali c'e' clear_all() (pulsante in
+Impostazioni).
+"""
 
 import json
+import os
 import time
 
 from qgis.PyQt.QtCore import QSettings
@@ -19,15 +28,23 @@ def get_utente():
     return _s().value(_PREFIX + "utente", verto_api.DEFAULT_USER, type=str)
 
 
+def _set_or_remove(name, value, default):
+    """Salva il valore solo se diverso dal predefinito, altrimenti lo toglie."""
+    if value and value != default:
+        _s().setValue(_PREFIX + name, value)
+    else:
+        _s().remove(_PREFIX + name)
+
+
 def set_utente(value):
-    _s().setValue(_PREFIX + "utente", value)
+    _set_or_remove("utente", value, verto_api.DEFAULT_USER)
 
 
 # La chiave personale e' salvata cifrata nel gestore di autenticazione di
 # QGIS; se non e' disponibile si ripiega sulle impostazioni in chiaro.
 # NB: chiamare get_chiave/set_chiave solo dal thread principale (il gestore
 # puo' chiedere la password principale).
-_AUTH_KEY = "igm_verto_chiave"
+_AUTH_SETTING = "igm_verto_chiave"
 
 
 def _auth():
@@ -43,8 +60,8 @@ def _auth():
 
 def get_chiave():
     am = _auth()
-    if am is not None and am.existsAuthSetting(_AUTH_KEY):
-        value = am.authSetting(_AUTH_KEY, "", True)
+    if am is not None and am.existsAuthSetting(_AUTH_SETTING):
+        value = am.authSetting(_AUTH_SETTING, "", True)
         if value:
             return str(value)
     return _s().value(_PREFIX + "chiave", verto_api.DEFAULT_KEY, type=str)
@@ -54,12 +71,12 @@ def set_chiave(value):
     """Salva la chiave. Ritorna True se e' stata salvata cifrata."""
     am = _auth()
     if value and value != verto_api.DEFAULT_KEY and am is not None:
-        if am.storeAuthSetting(_AUTH_KEY, value, True):
+        if am.storeAuthSetting(_AUTH_SETTING, value, True):
             _s().remove(_PREFIX + "chiave")
             return True
-    if am is not None and am.existsAuthSetting(_AUTH_KEY):
-        am.removeAuthSetting(_AUTH_KEY)
-    _s().setValue(_PREFIX + "chiave", value)
+    if am is not None and am.existsAuthSetting(_AUTH_SETTING):
+        am.removeAuthSetting(_AUTH_SETTING)
+    _set_or_remove("chiave", value, verto_api.DEFAULT_KEY)
     return False
 
 
@@ -74,29 +91,75 @@ def get_endpoint():
 
 
 def set_endpoint(value):
-    _s().setValue(_PREFIX + "endpoint", value or verto_api.ENDPOINT)
+    _set_or_remove("endpoint", value, verto_api.ENDPOINT)
+
+
+# Cache dell'elenco SRS: file nella cartella del plugin (non nel file ini).
+CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "srs_cache.json")
+
+
+def _read_cache():
+    """Contenuto della cache: {"time", "max_coord", "srs"} oppure {}."""
+    try:
+        with open(CACHE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def get_cached_srs():
     """Restituisce la lista SRS in cache, o None se assente."""
-    raw = _s().value(_PREFIX + "srs_cache", "", type=str)
-    if not raw:
-        return None
+    return _read_cache().get("srs") or None
+
+
+def set_cached_srs(srs_list, max_coord=verto_api.DEFAULT_MAX_COORD):
+    """Scrive la cache; ritorna False se la cartella non e' scrivibile."""
+    data = {"time": time.time(), "max_coord": int(max_coord), "srs": srs_list}
     try:
-        return json.loads(raw)
-    except ValueError:
-        return None
-
-
-def set_cached_srs(srs_list):
-    _s().setValue(_PREFIX + "srs_cache", json.dumps(srs_list))
-    _s().setValue(_PREFIX + "srs_cache_time", float(time.time()))
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+    except OSError:
+        return False
+    return True
 
 
 def cache_is_fresh():
     """True se l'elenco SRS in cache ha meno di CACHE_TTL_S secondi."""
-    saved = _s().value(_PREFIX + "srs_cache_time", 0.0, type=float)
+    saved = float(_read_cache().get("time", 0) or 0)
     return 0 <= time.time() - saved < CACHE_TTL_S
+
+
+# Chiavi scritte nel file ini dalle versioni precedenti e non piu' usate.
+_LEGACY_KEYS = ("srs_cache", "srs_cache_time", "max_coord", "ignore_ssl_errors")
+
+
+def cleanup_legacy():
+    """Toglie dal file ini le chiavi obsolete e i valori uguali ai predefiniti."""
+    s = _s()
+    for name in _LEGACY_KEYS:
+        s.remove(_PREFIX + name)
+    for name, default in (("utente", verto_api.DEFAULT_USER),
+                          ("chiave", verto_api.DEFAULT_KEY),
+                          ("endpoint", verto_api.ENDPOINT)):
+        if s.value(_PREFIX + name, default, type=str) == default:
+            s.remove(_PREFIX + name)
+
+
+def clear_all():
+    """Elimina tutto cio' che il plugin ha salvato: impostazioni nel file ini,
+    chiave nel gestore di autenticazione e cache dell'elenco SRS."""
+    global _info_failed
+    cleanup_legacy()
+    for name in ("utente", "chiave", "endpoint"):
+        _s().remove(_PREFIX + name)
+    am = _auth()
+    if am is not None and am.existsAuthSetting(_AUTH_SETTING):
+        am.removeAuthSetting(_AUTH_SETTING)
+    if os.path.exists(CACHE_FILE):
+        os.remove(CACHE_FILE)
+    _info_failed = False
 
 
 def supported_epsg():
@@ -106,11 +169,8 @@ def supported_epsg():
 
 
 def get_max_coord():
-    return _s().value(_PREFIX + "max_coord", verto_api.DEFAULT_MAX_COORD, type=int)
-
-
-def set_max_coord(value):
-    _s().setValue(_PREFIX + "max_coord", int(value))
+    value = _read_cache().get("max_coord")
+    return int(value) if value else verto_api.DEFAULT_MAX_COORD
 
 
 # Elenco di fallback dei sistemi supportati (richiesta "info" del servizio IGM),
@@ -178,6 +238,5 @@ def refresh_srs():
     if not srs:
         raise verto_api.VertoError("Il servizio IGM non ha restituito sistemi.")
     _info_failed = False
-    set_cached_srs(srs)
-    set_max_coord(max_coord)
+    set_cached_srs(srs, max_coord)
     return max_coord, srs
