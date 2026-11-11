@@ -33,6 +33,17 @@ class VertoMapTool(QgsMapToolEmitPoint):
             )
             return
 
+        if in_epsg not in settings.supported_epsg():
+            self.iface.messageBar().pushMessage(
+                "IGM Verto",
+                "Il CRS del progetto (EPSG:{}) non e' tra i sistemi gestiti "
+                "dal servizio IGM: imposta per il progetto un CRS italiano "
+                "(es. EPSG:3003, 6706, 7791) oppure usa la scheda "
+                "\"Coordinate manuali\".".format(in_epsg),
+                level=Qgis.MessageLevel.Warning,
+            )
+            return
+
         # Sceglie l'SRS di destinazione al primo click (o se non impostato)
         if self.target_epsg is None:
             epsg = pick_target_srs(self.canvas, exclude_epsg=in_epsg)
@@ -56,7 +67,6 @@ class VertoMapTool(QgsMapToolEmitPoint):
                 max_coord=settings.get_max_coord(),
             )
         except verto_api.VertoError as exc:
-            QApplication.restoreOverrideCursor()
             self.iface.messageBar().pushMessage(
                 "IGM Verto", "Errore: {}".format(exc),
                 level=Qgis.MessageLevel.Critical,

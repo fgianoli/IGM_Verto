@@ -8,10 +8,13 @@ from qgis.PyQt.QtCore import Qt
 from qgis.PyQt.QtWidgets import (
     QDialog, QTabWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLabel,
     QPushButton, QPlainTextEdit, QLineEdit, QCheckBox, QComboBox, QSpinBox,
-    QFileDialog, QMessageBox, QApplication, QProgressDialog, QWidget, QGroupBox
+    QFileDialog, QMessageBox, QApplication, QProgressDialog, QWidget, QGroupBox,
+    QListWidget, QListWidgetItem
 )
 
-from qgis.core import QgsProject, QgsMapLayerProxyModel, QgsApplication
+from qgis.core import (
+    QgsProject, QgsMapLayerProxyModel, QgsApplication, QgsVectorLayer
+)
 from qgis.gui import QgsMapLayerComboBox
 
 from .. import settings
@@ -190,6 +193,7 @@ class MainDialog(QDialog):
             result = verto_api.convert(in_epsg, out_epsg, coords, **_api_kwargs())
         except verto_api.VertoError as exc:
             QApplication.restoreOverrideCursor()
+            QApplication.setOverrideCursor(Qt.CursorShape.ArrowCursor)
             QMessageBox.critical(self, "IGM Verto", "Errore: {}".format(exc))
             return
         finally:
@@ -275,6 +279,14 @@ class MainDialog(QDialog):
         if path:
             self.c_out_path.setText(path)
 
+    @staticmethod
+    def _csv_number(text, decimal_comma):
+        """float da una cella CSV; con decimal_comma accetta '12,5'."""
+        text = text.strip().replace(" ", "")
+        if decimal_comma and "," in text and "." not in text:
+            text = text.replace(",", ".")
+        return float(text)
+
     def _csv_delimiter(self):
         return {0: ",", 1: ";", 2: "\t", 3: " "}[self.c_delim.currentIndex()]
 
@@ -319,16 +331,16 @@ class MainDialog(QDialog):
             header = rows[0]
             data_rows = rows[1:]
 
+        # La virgola decimale e' accettata se non e' anche il separatore
+        dec_comma = delim != ","
         coords = []
         valid_idx = []
         for idx, r in enumerate(data_rows):
-            try:
-                e = float(r[ci])
-                n = float(r[cn])
-            except (ValueError, IndexError):
-                continue
-            coords.append((e, n))
-            valid_idx.append(idx)
+            pair = self._csv_pair(r, ci, cn, dec_comma)
+            if pair is not None:
+                coords.append(pair)
+                valid_idx.append(idx)
+        n_skipped = sum(1 for r in data_rows if r) - len(coords)
         if not coords:
             QMessageBox.warning(
                 self, "IGM Verto",
@@ -342,6 +354,8 @@ class MainDialog(QDialog):
         def cb(done, total):
             progress.setValue(done)
             QApplication.processEvents()
+            if progress.wasCanceled():
+                raise verto_api.VertoError("Operazione annullata.")
 
         try:
             result = verto_api.convert(in_epsg, out_epsg, coords,
@@ -353,41 +367,69 @@ class MainDialog(QDialog):
         progress.setValue(len(coords))
 
         conv_map = dict(zip(valid_idx, result))
+        # Tutte le righe alla stessa larghezza: E_out/N_out restano incolonnati
+        width = max(len(r) for r in rows)
+
+        def padded(r):
+            return list(r) + [""] * (width - len(r))
         try:
             with open(out_path, "w", newline="", encoding="utf-8") as f:
                 writer = csv.writer(f, delimiter=delim)
                 if header is not None:
-                    writer.writerow(list(header) + ["E_out", "N_out"])
+                    writer.writerow(padded(header) + ["E_out", "N_out"])
                 for idx, r in enumerate(data_rows):
                     if idx in conv_map:
                         e, n = conv_map[idx]
-                        writer.writerow(list(r) + ["{:.8f}".format(e),
-                                                   "{:.8f}".format(n)])
+                        writer.writerow(padded(r) + ["{:.8f}".format(e),
+                                                     "{:.8f}".format(n)])
                     else:
-                        writer.writerow(list(r) + ["", ""])
+                        writer.writerow(padded(r) + ["", ""])
         except Exception as exc:
             QMessageBox.critical(self, "IGM Verto",
                                  "Scrittura CSV fallita: {}".format(exc))
             return
 
+        loaded = True
         if self.c_load.isChecked():
-            self._load_csv_as_points(out_path, out_epsg, delim)
-        QMessageBox.information(
-            self, "IGM Verto",
-            "Conversione completata: {} coordinate.\nSalvato in:\n{}".format(
-                len(coords), out_path))
+            # Senza intestazione i campi si chiamano field_1, field_2, ...
+            fields = (("E_out", "N_out") if header is not None else
+                      ("field_{}".format(width + 1), "field_{}".format(width + 2)))
+            loaded = self._load_csv_as_points(
+                out_path, out_epsg, delim, fields, header is not None)
+        msg = "Conversione completata: {} coordinate.\nSalvato in:\n{}".format(
+            len(coords), out_path)
+        if n_skipped:
+            msg += ("\n\nRighe saltate perche' prive di coordinate numeriche "
+                    "nelle colonne indicate: {}.".format(n_skipped))
+        if not loaded:
+            msg += ("\n\nNon e' stato possibile caricare il risultato come "
+                    "layer di punti: aggiungilo dal menu Layer > Aggiungi "
+                    "layer testo delimitato.")
+        QMessageBox.information(self, "IGM Verto", msg)
 
-    def _load_csv_as_points(self, path, epsg, delim=","):
+    def _csv_pair(self, row, ci, cn, dec_comma):
+        """(e, n) della riga, oppure None se le celle non sono numeriche."""
+        try:
+            return (self._csv_number(row[ci], dec_comma),
+                    self._csv_number(row[cn], dec_comma))
+        except (ValueError, IndexError):
+            return None
+
+    def _load_csv_as_points(self, path, epsg, delim=",",
+                            fields=("E_out", "N_out"), has_header=True):
         from qgis.PyQt.QtCore import QUrl
         from qgis.core import QgsVectorLayer
         crs = converter.epsg_to_crs(epsg)
         delim_enc = QUrl.toPercentEncoding(delim).data().decode("ascii")
-        uri = ("file:///{}?delimiter={}&xField=E_out&yField=N_out&crs={}"
+        uri = ("file:///{}?delimiter={}&useHeader={}&xField={}&yField={}&crs={}"
                ).format(path.lstrip("/"), delim_enc,
+                        "yes" if has_header else "no", fields[0], fields[1],
                         crs.authid() or ("EPSG:%d" % epsg))
         layer = QgsVectorLayer(uri, os.path.basename(path), "delimitedtext")
         if layer.isValid():
             QgsProject.instance().addMapLayer(layer)
+            return True
+        return False
 
     # ---------------------------------------------------------- TAB: layer
     def _labeled(self, text, *widgets):
@@ -407,7 +449,8 @@ class MainDialog(QDialog):
 
         mform = QFormLayout()
         self.l_mode = QComboBox()
-        self.l_mode.addItems(["Layer del progetto", "Cartella (batch)"])
+        self.l_mode.addItems(
+            ["Layer del progetto", "Più layer del progetto", "Cartella (batch)"])
         self.l_mode.currentIndexChanged.connect(self._layer_mode_changed)
         mform.addRow("Modalità:", self.l_mode)
         v.addLayout(mform)
@@ -422,6 +465,27 @@ class MainDialog(QDialog):
         self.l_selected = QCheckBox("Solo elementi selezionati")
         sg.addRow("", self.l_selected)
         v.addWidget(self.l_single_grp)
+
+        # Modalità: più layer del progetto
+        self.l_multi_grp = QGroupBox("Più layer del progetto")
+        mg = QVBoxLayout(self.l_multi_grp)
+        mg.addWidget(QLabel("Spunta i layer vettoriali da riproiettare:"))
+        self.l_multi_list = QListWidget()
+        self.l_multi_list.setMinimumHeight(140)
+        mg.addWidget(self.l_multi_list)
+        mrow = QHBoxLayout()
+        b_all = QPushButton("Seleziona tutti")
+        b_none = QPushButton("Deseleziona tutti")
+        b_ref = QPushButton("Aggiorna elenco")
+        b_all.clicked.connect(lambda: self._multi_set_all(True))
+        b_none.clicked.connect(lambda: self._multi_set_all(False))
+        b_ref.clicked.connect(self._multi_refresh)
+        for b in (b_all, b_none, b_ref):
+            mrow.addWidget(b)
+        mg.addLayout(mrow)
+        self.l_multi_selected = QCheckBox("Solo elementi selezionati")
+        mg.addWidget(self.l_multi_selected)
+        v.addWidget(self.l_multi_grp)
 
         # Modalità: cartella (batch)
         self.l_batch_grp = QGroupBox("Cartella (batch)")
@@ -443,10 +507,7 @@ class MainDialog(QDialog):
         sform.addRow("Sistema di origine:", self.l_in)
         sform.addRow("Sistema di destinazione:", self.l_out)
         v.addLayout(sform)
-        self.l_note = QLabel(
-            "In modalità cartella l'EPSG di origine viene letto dal CRS di "
-            "ciascun file; l'origine qui sopra è usata solo come ripiego per i "
-            "file privi di CRS.")
+        self.l_note = QLabel("")
         self.l_note.setWordWrap(True)
         v.addWidget(self.l_note)
 
@@ -494,26 +555,94 @@ class MainDialog(QDialog):
     def _out_ext(self):
         return {0: ".gpkg", 1: ".shp", 2: ".geojson"}[self.l_out_fmt.currentIndex()]
 
+    def _mode(self):
+        return ("single", "multi", "batch")[self.l_mode.currentIndex()]
+
     def _layer_mode_changed(self, *args):
-        batch = self.l_mode.currentIndex() == 1
-        self.l_single_grp.setVisible(not batch)
-        self.l_batch_grp.setVisible(batch)
-        self.l_note.setVisible(batch)
-        self.l_btn.setText("Riproietta cartella" if batch else "Riproietta layer")
+        mode = self._mode()
+        self.l_single_grp.setVisible(mode == "single")
+        self.l_multi_grp.setVisible(mode == "multi")
+        self.l_batch_grp.setVisible(mode == "batch")
+        self.l_note.setVisible(mode != "single")
+        if mode == "multi":
+            self.l_note.setText(
+                "L'EPSG di origine viene letto dal CRS di ciascun layer; "
+                "l'origine qui sopra è usata solo come ripiego per i layer il "
+                "cui CRS non è riconosciuto.")
+            self._multi_refresh()
+        elif mode == "batch":
+            self.l_note.setText(
+                "In modalità cartella l'EPSG di origine viene letto dal CRS di "
+                "ciascun file; l'origine qui sopra è usata solo come ripiego "
+                "per i file privi di CRS.")
+        self.l_btn.setText({
+            "single": "Riproietta layer",
+            "multi": "Riproietta i layer selezionati",
+            "batch": "Riproietta cartella"}[mode])
         self._layer_outmode_changed()
 
     def _layer_outmode_changed(self, *args):
-        batch = self.l_mode.currentIndex() == 1
-        if batch:
+        mode = self._mode()
+        to_file = self.l_out_mode.currentIndex() == 1
+        if mode == "batch":
             self.row_dest.setVisible(False)
             self.row_outfile.setVisible(False)
             self.row_outdir.setVisible(True)
             self.row_fmt.setVisible(True)
+        elif mode == "multi":
+            self.row_dest.setVisible(True)
+            self.row_outfile.setVisible(False)
+            self.row_outdir.setVisible(to_file)
+            self.row_fmt.setVisible(to_file)
         else:
             self.row_dest.setVisible(True)
             self.row_outdir.setVisible(False)
             self.row_fmt.setVisible(False)
-            self.row_outfile.setVisible(self.l_out_mode.currentIndex() == 1)
+            self.row_outfile.setVisible(to_file)
+
+    # -- selezione di più layer del progetto ------------------------------
+    def showEvent(self, event):
+        super().showEvent(event)
+        if hasattr(self, "l_multi_list") and self._mode() == "multi":
+            self._multi_refresh()
+
+    def _multi_refresh(self):
+        """Ricarica l'elenco dei layer vettoriali del progetto, mantenendo
+        le spunte già fatte."""
+        checked = set()
+        for i in range(self.l_multi_list.count()):
+            it = self.l_multi_list.item(i)
+            if it.checkState() == Qt.CheckState.Checked:
+                checked.add(it.data(Qt.ItemDataRole.UserRole))
+        self.l_multi_list.clear()
+        layers = [lyr for lyr in QgsProject.instance().mapLayers().values()
+                  if isinstance(lyr, QgsVectorLayer)]
+        for lyr in sorted(layers, key=lambda x: x.name().lower()):
+            epsg = converter.crs_to_epsg(lyr.crs())
+            label = "{}  [{}]".format(
+                lyr.name(), "EPSG:{}".format(epsg) if epsg else "CRS non riconosciuto")
+            it = QListWidgetItem(label)
+            it.setData(Qt.ItemDataRole.UserRole, lyr.id())
+            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            it.setCheckState(Qt.CheckState.Checked if lyr.id() in checked
+                             else Qt.CheckState.Unchecked)
+            self.l_multi_list.addItem(it)
+
+    def _multi_set_all(self, on):
+        state = Qt.CheckState.Checked if on else Qt.CheckState.Unchecked
+        for i in range(self.l_multi_list.count()):
+            self.l_multi_list.item(i).setCheckState(state)
+
+    def _multi_checked_layers(self):
+        out = []
+        for i in range(self.l_multi_list.count()):
+            it = self.l_multi_list.item(i)
+            if it.checkState() == Qt.CheckState.Checked:
+                lyr = QgsProject.instance().mapLayer(
+                    it.data(Qt.ItemDataRole.UserRole))
+                if lyr is not None:
+                    out.append(lyr)
+        return out
 
     def _layer_browse_indir(self):
         d = QFileDialog.getExistingDirectory(
@@ -542,8 +671,11 @@ class MainDialog(QDialog):
                 self.l_in.set_current_epsg(epsg)
 
     def _layer_run(self):
-        if self.l_mode.currentIndex() == 1:
+        mode = self._mode()
+        if mode == "batch":
             self._run_batch()
+        elif mode == "multi":
+            self._run_multi()
         else:
             self._run_single()
 
@@ -652,6 +784,148 @@ class MainDialog(QDialog):
         task.taskTerminated.connect(on_failed)
         self._start_task(task, "Conversione avviata in background...")
 
+    def _run_multi(self):
+        layers = self._multi_checked_layers()
+        if not layers:
+            QMessageBox.warning(
+                self, "IGM Verto", "Spunta almeno un layer da riproiettare.")
+            return
+        out_epsg = self.l_out.current_epsg()
+        if not out_epsg:
+            QMessageBox.warning(self, "IGM Verto",
+                                "Seleziona il sistema di destinazione.")
+            return
+        fallback_in = self.l_in.current_epsg()
+        sel = self.l_multi_selected.isChecked()
+        to_file = self.l_out_mode.currentIndex() == 1
+        out_dir = self.l_out_dir.text().strip()
+        ext = self._out_ext()
+        if to_file:
+            if not out_dir:
+                QMessageBox.warning(self, "IGM Verto",
+                                    "Specifica la cartella di output.")
+                return
+            try:
+                os.makedirs(out_dir, exist_ok=True)
+            except OSError as exc:
+                QMessageBox.critical(
+                    self, "IGM Verto",
+                    "Impossibile creare la cartella di output: {}".format(exc))
+                return
+
+        # Controlli per ciascun layer; quelli non convertibili sono saltati
+        jobs = []
+        skipped = []
+        for lyr in layers:
+            in_epsg = converter.crs_to_epsg(lyr.crs()) or fallback_in
+            if not in_epsg:
+                skipped.append("{}: CRS di origine sconosciuto".format(lyr.name()))
+            elif in_epsg == out_epsg:
+                skipped.append("{}: già in EPSG:{}".format(lyr.name(), out_epsg))
+            elif converter.same_datum(in_epsg, out_epsg):
+                skipped.append("{}: stesso datum ({}), usa la riproiezione "
+                               "standard di QGIS".format(
+                                   lyr.name(), converter.datum_of(in_epsg)))
+            elif sel and lyr.selectedFeatureCount() == 0:
+                skipped.append("{}: nessun elemento selezionato".format(lyr.name()))
+            else:
+                jobs.append((lyr, in_epsg))
+        if not jobs:
+            QMessageBox.warning(
+                self, "IGM Verto",
+                "Nessun layer convertibile:\n- " + "\n- ".join(skipped))
+            return
+        self._alias_notice(out_epsg, *[e for _l, e in jobs])
+
+        # Lettura dei dati nel thread principale
+        data = []
+        for lyr, in_epsg in jobs:
+            feats = list(lyr.selectedFeatures() if sel else lyr.getFeatures())
+            data.append({
+                "name": lyr.name(),
+                "in_epsg": in_epsg,
+                "geoms": [f.geometry() for f in feats],
+                "attrs": [f.attributes() for f in feats],
+                "fields": lyr.fields(),
+                "wkb": lyr.wkbType(),
+            })
+        load = self.l_load.isChecked()
+        api = _api_kwargs()
+        total_jobs = len(data)
+
+        def work(task):
+            results = []
+            for i, d in enumerate(data):
+                if task.isCanceled():
+                    break
+
+                def pcb(done, total, i=i):
+                    if task.isCanceled():
+                        raise verto_api.VertoError("Operazione annullata.")
+                    frac = (done / total) if total else 1.0
+                    task.setProgress((i + frac) * 100.0 / total_jobs)
+                try:
+                    res = converter.convert_geometries(
+                        d["geoms"], d["in_epsg"], out_epsg,
+                        progress_cb=pcb, **api)
+                    results.append((d, res, None))
+                except Exception as exc:
+                    results.append((d, None, str(exc)))
+            return results
+
+        def on_done():
+            made = 0
+            errors = list(skipped)
+            used_names = set()
+            for d, geoms, err in task.result:
+                if err:
+                    errors.append("{}: {}".format(d["name"], err))
+                    continue
+                name = "{}_EPSG{}".format(d["name"], out_epsg)
+                try:
+                    mem, n = converter.geoms_to_memory_layer(
+                        name, d["fields"], d["wkb"], out_epsg, d["attrs"], geoms)
+                    if to_file:
+                        safe = "".join(
+                            c if (c.isalnum() or c in "-_ .") else "_"
+                            for c in name).strip() or "layer"
+                        path = os.path.join(out_dir, safe + ext)
+                        k = 2
+                        while path.lower() in used_names or os.path.exists(path):
+                            path = os.path.join(
+                                out_dir, "{}_{}{}".format(safe, k, ext))
+                            k += 1
+                        used_names.add(path.lower())
+                        converter.write_vector(mem, path)
+                        if load:
+                            self._add_file_to_project(path)
+                    else:
+                        QgsProject.instance().addMapLayer(mem)
+                    made += 1
+                except Exception as exc:
+                    errors.append("{}: {}".format(d["name"], exc))
+            self.iface.messageBar().pushSuccess(
+                "IGM Verto",
+                "Layer convertiti: {}/{}".format(made, len(layers)))
+            if errors:
+                QMessageBox.warning(
+                    self, "IGM Verto",
+                    "Layer non convertiti ({}):\n- {}".format(
+                        len(errors), "\n- ".join(errors[:15])))
+            self._multi_refresh()
+
+        def on_failed():
+            msg = str(task.error) if task.error else "annullato"
+            self.iface.messageBar().pushWarning(
+                "IGM Verto", "Conversione non completata: {}".format(msg))
+
+        task = tasks.FunctionTask(
+            "IGM Verto: riproiezione di {} layer".format(total_jobs), work)
+        task.taskCompleted.connect(on_done)
+        task.taskTerminated.connect(on_failed)
+        self._start_task(task, "Conversione di {} layer avviata in "
+                               "background...".format(total_jobs))
+
     def _run_batch(self):
         in_dir = self.l_in_dir.text().strip()
         out_dir = self.l_out_dir.text().strip()
@@ -690,14 +964,22 @@ class MainDialog(QDialog):
             ok = 0
             errors = []
             outs = []
+            used = set()
             total = len(files)
             for i, f in enumerate(files):
                 if task.isCanceled():
                     break
                 task.setProgress(i * 100.0 / total if total else 0)
-                base = os.path.splitext(os.path.basename(f))[0]
-                out_path = os.path.join(
-                    out_dir, "{}_EPSG{}{}".format(base, out_epsg, ext))
+                base = "{}_EPSG{}".format(
+                    os.path.splitext(os.path.basename(f))[0], out_epsg)
+                # File omonimi in sottocartelle diverse: nomi distinti
+                out_path = os.path.join(out_dir, base + ext)
+                k = 2
+                while out_path.lower() in used:
+                    out_path = os.path.join(
+                        out_dir, "{}_{}{}".format(base, k, ext))
+                    k += 1
+                used.add(out_path.lower())
                 try:
                     converter.reproject_path_to_file(
                         f, out_path, out_epsg, fallback_in_epsg=fallback_in,

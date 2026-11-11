@@ -49,6 +49,9 @@ class VertoReprojectAlgorithm(QgsProcessingAlgorithm):
             "Riproietta un layer vettoriale convertendone tutti i vertici "
             "tramite l'API IGM \"Verto on line\" (grigliati nazionali), piu' "
             "precisa delle trasformazioni PROJ standard tra datum italiani.\n\n"
+            "Utente e chiave IGM, se lasciati vuoti, sono quelli salvati "
+            "nelle Impostazioni del plugin (consigliato: cosi' la chiave non "
+            "resta nella cronologia di Processing).\n\n"
             "Il CRS di origine, se non specificato, e' quello del layer. Il "
             "CRS di destinazione deve essere un sistema supportato da IGM "
             "(es. EPSG:6706 RDN2008, EPSG:3003/3004 Monte Mario, EPSG:23032 "
@@ -67,12 +70,23 @@ class VertoReprojectAlgorithm(QgsProcessingAlgorithm):
             defaultValue="EPSG:6706"))
         self.addParameter(QgsProcessingParameterString(
             self.UTENTE, self.tr("Utente IGM (opzionale)"),
-            defaultValue=settings.get_utente(), optional=True))
+            defaultValue="", optional=True))
         self.addParameter(QgsProcessingParameterString(
             self.CHIAVE, self.tr("Chiave IGM (opzionale)"),
-            defaultValue=settings.get_chiave(), optional=True))
+            defaultValue="", optional=True))
         self.addParameter(QgsProcessingParameterFeatureSink(
             self.OUTPUT, self.tr("Layer convertito")))
+
+    def prepareAlgorithm(self, parameters, context, feedback):
+        # Eseguito nel thread principale: qui si leggono le credenziali
+        # salvate (la chiave puo' stare nel gestore di autenticazione).
+        self._utente = (self.parameterAsString(parameters, self.UTENTE, context)
+                        or settings.get_utente())
+        self._chiave = (self.parameterAsString(parameters, self.CHIAVE, context)
+                        or settings.get_chiave())
+        self._endpoint = settings.get_endpoint()
+        self._max_coord = settings.get_max_coord()
+        return True
 
     def processAlgorithm(self, parameters, context, feedback):
         source = self.parameterAsSource(parameters, self.INPUT, context)
@@ -96,9 +110,12 @@ class VertoReprojectAlgorithm(QgsProcessingAlgorithm):
         if in_epsg == out_epsg:
             raise QgsProcessingException(
                 "CRS di origine e destinazione coincidono.")
-
-        utente = self.parameterAsString(parameters, self.UTENTE, context) or settings.get_utente()
-        chiave = self.parameterAsString(parameters, self.CHIAVE, context) or settings.get_chiave()
+        if converter.same_datum(in_epsg, out_epsg):
+            raise QgsProcessingException(
+                "Origine e destinazione appartengono allo stesso datum ({}): "
+                "il servizio IGM converte solo tra datum diversi. Usa "
+                "l'algoritmo standard \"Riproietta layer\" di QGIS.".format(
+                    converter.datum_of(in_epsg)))
 
         (sink, dest_id) = self.parameterAsSink(
             parameters, self.OUTPUT, context,
@@ -124,9 +141,9 @@ class VertoReprojectAlgorithm(QgsProcessingAlgorithm):
         try:
             new_geoms = converter.convert_geometries(
                 geoms, in_epsg, out_epsg,
-                utente=utente, chiave=chiave,
-                endpoint=settings.get_endpoint(),
-                max_coord=settings.get_max_coord(),
+                utente=self._utente, chiave=self._chiave,
+                endpoint=self._endpoint,
+                max_coord=self._max_coord,
                 progress_cb=progress_cb)
         except verto_api.VertoError as exc:
             raise QgsProcessingException("Errore IGM Verto: {}".format(exc))

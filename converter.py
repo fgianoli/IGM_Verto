@@ -87,14 +87,9 @@ def match_epsg_by_params(custom_key, candidates):
 
 
 def _crs_proj(crs):
-    for name in ("toProj", "toProj4"):
-        fn = getattr(crs, name, None)
-        if fn:
-            try:
-                return fn()
-            except Exception:  # pragma: no cover
-                continue
-    return ""
+    """Stringa PROJ del CRS (toProj in QGIS recenti, toProj4 nelle vecchie)."""
+    fn = getattr(crs, "toProj", None) or getattr(crs, "toProj4", None)
+    return fn() if fn else ""
 
 
 def _guess_epsg_from_custom_crs(crs):
@@ -122,9 +117,12 @@ def epsg_to_crs(epsg):
 DATUM_FAMILIES = {
     "Monte Mario / Roma40": {4265, 3003, 3004, 4806},
     "ED50": {4230, 23032, 23033, 23034},
-    "IGM95": {4670, 3064, 3065, 9716},
-    "RDN2008 / ETRS89": {6706, 6707, 6708, 6709, 6876, 7791, 7792, 7793,
-                         7794, 7795, 3035, 3034},
+    # Per il servizio IGM, ETRS89-LAEA/LCC (3035, 3034) appartengono allo
+    # stesso datum di IGM95 (ETRF89), non di RDN2008 (ETRF2000): verificato
+    # con la matrice completa delle conversioni (ottobre 2026).
+    "IGM95 / ETRF89": {4670, 3064, 3065, 9716, 3035, 3034},
+    "RDN2008 / ETRF2000": {6706, 6707, 6708, 6709, 6875, 6876, 7791, 7792,
+                           7793, 7794, 7795},
 }
 
 
@@ -154,6 +152,8 @@ def convert_geometries(geometries, in_epsg, out_epsg, utente="qgis",
     """
     Converte una lista di QgsGeometry. Tutti i vertici di tutte le geometrie
     vengono raccolti e inviati in batch (rispettando max_coord), poi riscritti.
+    Le coordinate ripetute (bordi condivisi tra poligoni adiacenti, vertice di
+    chiusura degli anelli) sono inviate al servizio una sola volta.
     La quota Z e l'eventuale valore M dei vertici vengono preservati (il
     servizio IGM converte solo la planimetria).
     Restituisce una nuova lista di QgsGeometry (le originali non sono modificate).
@@ -180,11 +180,13 @@ def convert_geometries(geometries, in_epsg, out_epsg, utente="qgis",
         out_geoms.append(g)
 
     if all_points:
-        converted = verto_api.convert(
-            in_epsg, out_epsg, all_points,
+        unique, index = unique_points(all_points)
+        conv_unique = verto_api.convert(
+            in_epsg, out_epsg, unique,
             utente=utente, chiave=chiave, endpoint=endpoint,
             max_coord=max_coord, progress_cb=progress_cb,
         )
+        converted = [conv_unique[i] for i in index]
     else:
         converted = []
 
@@ -199,6 +201,25 @@ def convert_geometries(geometries, in_epsg, out_epsg, utente="qgis",
                 new_pt.addMValue(m)
             g.moveVertex(new_pt, k)
     return out_geoms
+
+
+def unique_points(points):
+    """Elimina le coordinate ripetute.
+
+    Ritorna (unique, index): unique e' la lista delle coordinate distinte
+    nell'ordine di prima comparsa, index[i] la posizione in unique del punto i.
+    """
+    seen = {}
+    unique = []
+    index = []
+    for pt in points:
+        pos = seen.get(pt)
+        if pos is None:
+            pos = len(unique)
+            seen[pt] = pos
+            unique.append(pt)
+        index.append(pos)
+    return unique, index
 
 
 def reproject_layer_to_memory(source_layer, out_epsg, selected_only=False,
@@ -318,7 +339,11 @@ def write_vector(layer, out_path):
     except AttributeError:  # QGIS < 3.20
         res = QgsVectorFileWriter.writeAsVectorFormatV2(layer, out_path, ctx, opts)
     code = res[0] if isinstance(res, (tuple, list)) else res
-    if code != QgsVectorFileWriter.NoError:
+    # Enum con ambito in QGIS 4 / PyQt6, senza ambito nelle versioni vecchie
+    no_error = getattr(
+        getattr(QgsVectorFileWriter, "WriterError", QgsVectorFileWriter),
+        "NoError")
+    if code != no_error:
         detail = res[1] if isinstance(res, (tuple, list)) and len(res) > 1 else code
         raise verto_api.VertoError("Scrittura su file fallita: {}".format(detail))
     return out_path

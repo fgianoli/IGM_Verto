@@ -2,6 +2,7 @@
 """Gestione delle impostazioni del plugin (credenziali, endpoint, cache SRS)."""
 
 import json
+import time
 
 from qgis.PyQt.QtCore import QSettings
 
@@ -22,12 +23,44 @@ def set_utente(value):
     _s().setValue(_PREFIX + "utente", value)
 
 
+# La chiave personale e' salvata cifrata nel gestore di autenticazione di
+# QGIS; se non e' disponibile si ripiega sulle impostazioni in chiaro.
+# NB: chiamare get_chiave/set_chiave solo dal thread principale (il gestore
+# puo' chiedere la password principale).
+_AUTH_KEY = "igm_verto_chiave"
+
+
+def _auth():
+    """Gestore di autenticazione di QGIS, o None se non utilizzabile."""
+    from qgis.core import QgsApplication
+    am = QgsApplication.authManager()
+    if am is None or not hasattr(am, "storeAuthSetting"):
+        return None
+    if am.isDisabled():
+        return None
+    return am
+
+
 def get_chiave():
+    am = _auth()
+    if am is not None and am.existsAuthSetting(_AUTH_KEY):
+        value = am.authSetting(_AUTH_KEY, "", True)
+        if value:
+            return str(value)
     return _s().value(_PREFIX + "chiave", verto_api.DEFAULT_KEY, type=str)
 
 
 def set_chiave(value):
+    """Salva la chiave. Ritorna True se e' stata salvata cifrata."""
+    am = _auth()
+    if value and value != verto_api.DEFAULT_KEY and am is not None:
+        if am.storeAuthSetting(_AUTH_KEY, value, True):
+            _s().remove(_PREFIX + "chiave")
+            return True
+    if am is not None and am.existsAuthSetting(_AUTH_KEY):
+        am.removeAuthSetting(_AUTH_KEY)
     _s().setValue(_PREFIX + "chiave", value)
+    return False
 
 
 def has_personal_credentials():
@@ -57,6 +90,19 @@ def get_cached_srs():
 
 def set_cached_srs(srs_list):
     _s().setValue(_PREFIX + "srs_cache", json.dumps(srs_list))
+    _s().setValue(_PREFIX + "srs_cache_time", float(time.time()))
+
+
+def cache_is_fresh():
+    """True se l'elenco SRS in cache ha meno di CACHE_TTL_S secondi."""
+    saved = _s().value(_PREFIX + "srs_cache_time", 0.0, type=float)
+    return 0 <= time.time() - saved < CACHE_TTL_S
+
+
+def supported_epsg():
+    """Insieme dei codici EPSG accettati dal plugin (alias compresi)."""
+    _max, srs = load_srs()
+    return {int(x["epsg"]) for x in srs}
 
 
 def get_max_coord():
@@ -93,25 +139,45 @@ FALLBACK_SRS = [
 ]
 
 
-def load_srs(force_refresh=False):
-    """
-    Restituisce (max_coord, srs_list).
-    Prova la cache; se assente o force_refresh interroga l'API; in caso di
-    errore di rete usa la cache o il fallback statico.
-    """
-    if not force_refresh:
-        cached = get_cached_srs()
-        if cached:
-            return get_max_coord(), verto_api.with_extra_srs(cached)
-    try:
-        max_coord, srs = verto_api.get_info(get_endpoint())
-        if srs:
-            set_cached_srs(srs)
-            set_max_coord(max_coord)
-            return max_coord, srs
-    except verto_api.VertoError:
-        pass
+# L'elenco in cache viene rinnovato dal servizio dopo una settimana.
+CACHE_TTL_S = 7 * 24 * 3600
+# True dopo una richiesta "info" fallita: nella stessa sessione di QGIS non si
+# riprova in automatico (evita blocchi e avvisi ripetuti a server irraggiungibile).
+_info_failed = False
+
+
+def _offline_srs():
     cached = get_cached_srs()
     if cached:
         return get_max_coord(), verto_api.with_extra_srs(cached)
-    return verto_api.DEFAULT_MAX_COORD, list(FALLBACK_SRS)
+    return verto_api.DEFAULT_MAX_COORD, verto_api.with_extra_srs(FALLBACK_SRS)
+
+
+def load_srs(force_refresh=False):
+    """
+    Restituisce (max_coord, srs_list).
+    Usa la cache se recente; altrimenti (o con force_refresh) interroga l'API,
+    al piu' una volta per sessione in caso di errore; se la rete non risponde
+    usa la cache o l'elenco statico.
+    """
+    global _info_failed
+    if not force_refresh:
+        if _info_failed or (get_cached_srs() and cache_is_fresh()):
+            return _offline_srs()
+    try:
+        return refresh_srs()
+    except verto_api.VertoError:
+        _info_failed = True
+        return _offline_srs()
+
+
+def refresh_srs():
+    """Interroga il servizio e aggiorna la cache. Solleva VertoError."""
+    global _info_failed
+    max_coord, srs = verto_api.get_info(get_endpoint())
+    if not srs:
+        raise verto_api.VertoError("Il servizio IGM non ha restituito sistemi.")
+    _info_failed = False
+    set_cached_srs(srs)
+    set_max_coord(max_coord)
+    return max_coord, srs

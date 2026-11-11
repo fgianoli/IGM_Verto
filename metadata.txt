@@ -5,7 +5,7 @@ name=IGM Verto Coordinate Converter
 qgisMinimumVersion=3.16
 qgisMaximumVersion=4.99
 description=Coordinate conversion using the official IGM grids (Verto online API) - Conversione coordinate con i grigliati ufficiali IGM (API Verto online).
-version=1.3.2
+version=1.4.3
 author=Federico Gianoli
 email=gianoli.federico@gmail.com
 
@@ -16,6 +16,13 @@ repository=https://github.com/fgianoli/IGM_Verto
 homepage=https://github.com/fgianoli/IGM_Verto
 
 changelog=
+    1.4.3 - Certificato IGM scaduto: il plugin torna a funzionare senza intervento dell'utente. Se QGIS rifiuta la connessione, la richiesta viene ripetuta accettando solo l'errore "certificato scaduto" e solo per il certificato IGM noto (impronta fissata): catena, nome host e identita' del server restano verificati, ogni altro errore o certificato e' rifiutato. Quando l'IGM rinnova il certificato il ripiego non viene piu' usato. Rimossa l'opzione "Ignora errori del certificato SSL" introdotta nella 1.4.1: non serve piu' e disattivava ogni verifica
+    1.4.2 - Revisione generale. Sicurezza: la chiave IGM non e' piu' proposta come valore predefinito nell'algoritmo Processing (restava in chiaro nella cronologia) ed e' salvata cifrata nel gestore di autenticazione di QGIS. Rete: blocchi da 5000 punti con due nuovi tentativi sugli errori di rete, coordinate ripetute inviate una sola volta, un solo tentativo per sessione di leggere l'elenco SRS a server irraggiungibile, cache dell'elenco rinnovata ogni settimana. CSV: virgola decimale accettata, righe saltate contate, pulsante Annulla funzionante, caricamento come punti anche senza intestazione. Altro: nomi di output unici nel batch con sottocartelle, messaggio chiaro se il CRS del progetto non e' gestito (click sulla mappa), controllo stesso datum in Processing, codici legacy nell'elenco di ripiego, compatibilita' enum QGIS 4 nel salvataggio su file
+    1.4.1 - Certificato SSL del server IGM scaduto (7 novembre 2026): messaggio d'errore esplicito e nuova opzione in Impostazioni "Ignora errori del certificato SSL (non sicuro)", disattivata di default e con avviso, da usare solo finche' l'IGM non rinnova il certificato
+    1.4.0 - Scheda Layer: nuova modalita' "Piu layer del progetto" per riproiettare piu layer vettoriali caricati in una sola operazione (elenco con caselle, seleziona/deseleziona tutti, origine letta dal CRS di ciascun layer, output in memoria o in cartella, layer non convertibili saltati e segnalati)
+    1.3.5 - Verifica completa dei sistemi supportati dal servizio IGM (20 EPSG, tutti presenti): corretta l'appartenenza al datum di ETRS89-LAEA/LCC (3035, 3034), che per il servizio e' lo stesso di IGM95 e non di RDN2008; ora le conversioni 3035/3034 <-> RDN2008 non sono piu' bloccate dal plugin e quelle 3035/3034 <-> IGM95 sono segnalate prima della chiamata
+    1.3.4 - Istruzioni e link alla pagina IGM per ottenere le credenziali (login, Area Riservata, Abbonamenti ai servizi; obbligatorie dal 1 novembre 2026, scadenza trimestrale) in Impostazioni, guida e README, con pulsante per aprire la pagina; aggiunto EPSG:6875 (Italy zone, N-E) inoltrato come 7794
+    1.3.3 - Sicurezza/qualita': rimosso un blocco try/except/continue segnalato dalla scansione del repository plugin
     1.3.2 - Allineamento al nuovo elenco SRS del servizio IGM (ottobre 2026): 7795 e 7791-7793 (RDN2008 proiettato, assi E-N) ora nativi; i vecchi 6876/6707/6708/6709 (assi N-E) restano accettati e sono inoltrati con il codice nuovo, con avviso. Riconoscimento dei layer con CRS personalizzato (es. shapefile scaricati dal geoportale regionale con .prj "RDN2008 / Zone 12") tramite i parametri di proiezione
     1.3.1 - Aggiunto EPSG:7795 (RDN2008 / Zone 12, E-N): non e' ancora supportato dal servizio IGM, viene inoltrato come EPSG:6876 (stessi parametri, cambia solo l'ordine degli assi), con avviso esplicativo nell'interfaccia, nell'etichetta del menu, nella guida e nel log Processing
     1.3.0 - Preparazione al controllo utente+chiave IGM (attivazione prevista entro fine 2026): impostazioni con link a "Abbonamenti ai servizi", chiave mascherata, messaggio guidato se le credenziali sono rifiutate o scadute (validita' trimestrale)

@@ -31,15 +31,22 @@ Il pulsante <b>Scambia</b> inverte origine/destinazione.</li>
 c'&egrave; un'intestazione e i numeri delle colonne E ed N. Scegli i sistemi e
 il file di output: viene creato un nuovo CSV con due colonne aggiuntive
 (<code>E_out</code>, <code>N_out</code>); opzionalmente il risultato viene
-caricato come layer di punti.</li>
-<li><b>Layer vettoriale</b> (prima scheda) &ndash; due modalit&agrave;:
+caricato come layer di punti. Sono accettati i numeri con la virgola
+decimale (se il separatore non &egrave; la virgola); le righe senza
+coordinate numeriche restano vuote e vengono contate nel riepilogo.</li>
+<li><b>Layer vettoriale</b> (prima scheda) &ndash; tre modalit&agrave;:
 <i>Layer del progetto</i> (scegli un layer, eventualmente solo gli elementi
-selezionati) oppure <i>Cartella (batch)</i> per convertire in blocco tutti i
-file vettoriali di una cartella (anche le sottocartelle). L'output pu&ograve;
-essere creato <b>in memoria</b> (solo nel progetto) o <b>salvato su file</b>
-(GeoPackage, Shapefile, GeoJSON). In batch indichi una cartella di output e il
-formato; l'EPSG di origine &egrave; letto dal CRS di ciascun file. Le geometrie
-(punti, linee, poligoni, multi) vengono convertite vertice per vertice.</li>
+selezionati); <i>Pi&ugrave; layer del progetto</i> (spunta quanti layer vuoi
+dall'elenco dei vettoriali caricati: ciascuno viene convertito dal proprio CRS
+e i layer non convertibili, per esempio gi&agrave; nel sistema di destinazione
+o con CRS sconosciuto, vengono saltati e segnalati alla fine); oppure
+<i>Cartella (batch)</i> per convertire in blocco tutti i file vettoriali di una
+cartella (anche le sottocartelle). L'output pu&ograve; essere creato <b>in
+memoria</b> (solo nel progetto) o <b>salvato su file</b> (GeoPackage,
+Shapefile, GeoJSON). Con pi&ugrave; layer o in batch indichi una cartella di
+output e il formato; l'EPSG di origine &egrave; letto dal CRS di ciascun layer o
+file. Le geometrie (punti, linee, poligoni, multi) vengono convertite vertice
+per vertice.</li>
 </ul>
 
 <h4>2. Click sulla mappa</h4>
@@ -50,13 +57,22 @@ compaiono nella barra dei messaggi di QGIS.</p>
 <h4>3. Algoritmo Processing</h4>
 <p>In <i>Processing &rsaquo; Cassetta degli strumenti &rsaquo; IGM Verto</i>
 trovi <b>Riproietta con grigliati IGM (Verto)</b>, utilizzabile anche in
-modalit&agrave; batch e nei modelli grafici.</p>
+modalit&agrave; batch e nei modelli grafici. Lascia vuoti utente e chiave:
+vengono usati quelli delle Impostazioni e non restano nella cronologia di
+Processing.</p>
 
 <h4>4. Impostazioni</h4>
-<p>Imposta <b>Utente</b> e <b>Chiave</b> (oggi <i>ignorati</i> dal servizio ma
-obbligatori nella richiesta: puoi lasciare i valori predefiniti),
-l'<b>endpoint</b> dell'API e aggiorna l'elenco dei sistemi di riferimento
-direttamente dal server.</p>
+<p>Imposta <b>Utente</b> e <b>Chiave</b>, l'<b>endpoint</b> dell'API e
+aggiorna l'elenco dei sistemi di riferimento direttamente dal server.</p>
+<p><b>Credenziali IGM.</b> Dal <b>1&deg; novembre 2026</b> il servizio richiede
+un account (gratuito); le credenziali scadono ogni 3 mesi. Per ottenerle:
+(1) apri la <a href="https://igmi.esercito.difesa.it/servizi/verto-online/">pagina
+IGM di Verto online</a> ed effettua il <b>login</b>; (2) entra nell'<b>Area
+Riservata</b> e scegli <b>Abbonamenti ai servizi</b> (ultimo tasto a sinistra
+nella pagina utente); (3) copia nome utente e chiave/password in
+<i>Impostazioni</i>; (4) rinnovale ogni 3 mesi dalla stessa sezione. Se vedi
+&laquo;Credenziali IGM non accettate&raquo; le credenziali sono errate o
+scadute.</p>
 
 <h3 style="color:#0b6e4f;">Note importanti</h3>
 <ul>
@@ -66,7 +82,10 @@ direttamente dal server.</p>
 <li>Le conversioni <b>nello stesso datum</b> non sono supportate dal servizio
 (es. da &laquo;RDN2008 2D geo&raquo; a &laquo;RDN2008 / TM32&raquo;).</li>
 <li>Limite del servizio: <b>32000 coordinate per richiesta</b>; il plugin
-suddivide automaticamente i lotti pi&ugrave; grandi.</li>
+invia blocchi di al pi&ugrave; 5000 punti, una sola volta le coordinate
+ripetute, e ritenta due volte il blocco in caso di errore di rete.</li>
+<li>La chiave personale &egrave; salvata cifrata nel gestore di autenticazione
+di QGIS (pu&ograve; essere richiesta la password principale).</li>
 </ul>
 
 <h3 style="color:#0b6e4f;">Condizioni d'uso e licenza (IGM)</h3>
@@ -100,7 +119,7 @@ QGIS).</p>
 3065, 9716), ETRS89-LAEA/LCC (3035, 3034) e RDN2008 (6706, 7791-7795).</p>
 <p>Dall'ottobre 2026 l'IGM offre gli RDN2008 proiettati solo con assi E-N
 (<b>EPSG:7791, 7792, 7793, 7794, 7795</b>). I vecchi codici con assi N-E
-(<b>6876, 6707, 6708, 6709</b>), ancora presenti in molti file scaricati da
+(<b>6875, 6876, 6707, 6708, 6709</b>), ancora presenti in molti file scaricati da
 geoportali regionali, restano utilizzabili: il plugin li <b>inoltra al servizio
 con il codice E-N equivalente</b> (stessi parametri di proiezione, cambia solo
 l'ordine degli assi) e mostra un avviso. I layer con sistema di riferimento

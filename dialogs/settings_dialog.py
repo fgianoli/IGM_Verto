@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """Dialog impostazioni: credenziali, endpoint, aggiornamento elenco SRS."""
 
-from qgis.PyQt.QtCore import Qt
+from qgis.PyQt.QtCore import Qt, QUrl
+from qgis.PyQt.QtGui import QDesktopServices
 from qgis.PyQt.QtWidgets import (
     QDialog, QFormLayout, QVBoxLayout, QHBoxLayout, QLineEdit, QPushButton,
     QLabel, QMessageBox, QApplication, QDialogButtonBox
@@ -18,16 +19,7 @@ class SettingsDialog(QDialog):
         self.setMinimumWidth(460)
 
         layout = QVBoxLayout(self)
-        intro = QLabel(
-            "Il servizio IGM e' e restera' gratuito. Entro fine anno IGM "
-            "attivera' il controllo utente + chiave (a fini statistici); "
-            "le chiavi hanno validita' trimestrale.<br>"
-            "Ottienile dopo l'accesso al sito IGM, in <b>Abbonamenti ai "
-            "servizi</b> (ultimo tasto a sinistra nella pagina utente): "
-            "<a href=\"{}\">igmi.esercito.difesa.it</a>.<br>"
-            "Finche' il controllo non e' attivo puoi lasciare i valori "
-            "predefiniti.".format(verto_api.CREDENTIALS_URL)
-        )
+        intro = QLabel(verto_api.CREDENTIALS_HELP_HTML)
         intro.setTextFormat(Qt.TextFormat.RichText)
         intro.setOpenExternalLinks(True)
         intro.setWordWrap(True)
@@ -37,11 +29,19 @@ class SettingsDialog(QDialog):
         self.utente_edit = QLineEdit(settings.get_utente())
         self.chiave_edit = QLineEdit(settings.get_chiave())
         self.chiave_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        self.chiave_edit.setToolTip(
+            "La chiave personale viene salvata cifrata nel gestore di "
+            "autenticazione di QGIS (puo' essere richiesta la password "
+            "principale di QGIS).")
         self.endpoint_edit = QLineEdit(settings.get_endpoint())
         form.addRow("Utente:", self.utente_edit)
-        form.addRow("Chiave:", self.chiave_edit)
+        form.addRow("Chiave / password:", self.chiave_edit)
         form.addRow("Endpoint API:", self.endpoint_edit)
         layout.addLayout(form)
+
+        self.open_btn = QPushButton("Apri la pagina IGM per ottenere le credenziali")
+        self.open_btn.clicked.connect(self.open_igm_page)
+        layout.addWidget(self.open_btn)
 
         refresh_row = QHBoxLayout()
         self.refresh_btn = QPushButton("Aggiorna elenco SRS dal server")
@@ -62,14 +62,18 @@ class SettingsDialog(QDialog):
         if cached:
             self.status_lbl.setText("{} SRS in cache.".format(len(cached)))
 
+    def open_igm_page(self):
+        QDesktopServices.openUrl(QUrl(verto_api.CREDENTIALS_URL))
+
     def refresh_srs(self):
         # Salva prima l'endpoint corrente per usarlo nella richiesta
         settings.set_endpoint(self.endpoint_edit.text().strip())
         QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
         try:
-            max_coord, srs = settings.load_srs(force_refresh=True)
+            max_coord, srs = settings.refresh_srs()
         except verto_api.VertoError as exc:
             QApplication.restoreOverrideCursor()
+            QApplication.setOverrideCursor(Qt.CursorShape.ArrowCursor)
             QMessageBox.warning(self, "IGM Verto", "Errore: {}".format(exc))
             return
         finally:
