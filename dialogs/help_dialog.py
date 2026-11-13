@@ -72,7 +72,8 @@ Riservata</b> e scegli <b>Abbonamenti ai servizi</b> (ultimo tasto a sinistra
 nella pagina utente); (3) copia nome utente e chiave/password in
 <i>Impostazioni</i>; (4) rinnovale ogni 3 mesi dalla stessa sezione. Se vedi
 &laquo;Credenziali IGM non accettate&raquo; le credenziali sono errate o
-scadute.</p>
+scadute. Il controllo &egrave; attivo dal 13 novembre 2026: con i valori
+predefiniti <i>qgis</i> il servizio rifiuta le conversioni.</p>
 
 <h3 style="color:#0b6e4f;">Note importanti</h3>
 <ul>

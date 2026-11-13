@@ -22,6 +22,7 @@ ritentato (RETRY_DELAYS) prima di interrompere la conversione.
 """
 
 import json
+import os
 import time
 
 ENDPOINT = "https://igmi.esercito.difesa.it/porta-magna/wps/volapi"
@@ -33,15 +34,15 @@ CHUNK_SIZE = 5000
 RETRY_DELAYS = (2, 5)
 # Timeout della richiesta "info" (elenco SRS), fatta dal thread principale.
 INFO_TIMEOUT_MS = 15000
-# Timeout del client di ripiego per il certificato scaduto (vedi _pinned_post).
-PINNED_TIMEOUT_MS = 120000
+# Timeout del client di ripiego per la catena incompleta (vedi _chain_post).
+FALLBACK_TIMEOUT_MS = 120000
 
 try:
     from qgis.core import QgsBlockingNetworkRequest
-    from qgis.PyQt.QtCore import (
-        QUrl, QByteArray, QEventLoop, QTimer, QCryptographicHash)
+    from qgis.PyQt.QtCore import QUrl, QByteArray, QEventLoop, QTimer
     from qgis.PyQt.QtNetwork import (
-        QNetworkRequest, QNetworkAccessManager, QNetworkReply, QSslError)
+        QNetworkRequest, QNetworkAccessManager, QNetworkReply,
+        QSslCertificate, QSslConfiguration)
     _HAS_QGIS = True
 except Exception:  # pragma: no cover - fuori da QGIS
     _HAS_QGIS = False
@@ -64,8 +65,9 @@ CREDENTIALS_HELP_HTML = (
     "servizi</b> (ultimo tasto a sinistra nella pagina utente);</li>"
     "<li>copia nome utente e chiave/password e inseriscili qui sotto;</li>"
     "<li>ogni 3 mesi ripeti la consultazione per rinnovarle.</li></ol>"
-    "Finch&eacute; il controllo non &egrave; attivo puoi lasciare i valori "
-    "predefiniti."
+    "Il controllo delle credenziali &egrave; <b>attivo</b> (verificato il 13 "
+    "novembre 2026): con i valori predefiniti <i>qgis</i> il servizio rifiuta "
+    "le conversioni."
 ).format(url=CREDENTIALS_URL)
 
 # Dal 2026-10 l'IGM ha sostituito i vecchi EPSG RDN2008 proiettati con assi
@@ -151,13 +153,21 @@ class VertoNetworkError(VertoError):
     """Errore di rete (potenzialmente transitorio: si puo' ritentare)."""
 
 
-def _auth_error(message, dove=None):
+def _auth_error(message, dove=None, utente=None, chiave=None):
+    if utente == DEFAULT_USER or chiave == DEFAULT_KEY:
+        hint = (
+            "Stai usando le credenziali predefinite del plugin, che il "
+            "servizio IGM non accetta piu': dal 1 novembre 2026 servono "
+            "utente e chiave personali (gratuiti). Accedi al sito IGM, apri "
+            "'Abbonamenti ai servizi' e inseriscili in Impostazioni del "
+            "plugin.")
+    else:
+        hint = (
+            "Le chiavi hanno validita' trimestrale: accedi al sito IGM, apri "
+            "'Abbonamenti ai servizi' e aggiorna utente/chiave in "
+            "Impostazioni del plugin.")
     return VertoAuthError(
-        "Credenziali IGM non accettate: {}. Le chiavi hanno validita' "
-        "trimestrale: accedi al sito IGM, apri 'Abbonamenti ai servizi' e "
-        "aggiorna utente/chiave in Impostazioni del plugin.".format(message),
-        dove,
-    )
+        "Credenziali IGM non accettate: {}. {}".format(message, hint), dove)
 
 
 def _looks_like_auth_error(message):
@@ -193,56 +203,72 @@ def _is_ssl_message(text):
 
 
 SSL_HELP = (
-    "Il certificato SSL del server IGM non e' valido e non e' quello, "
-    "scaduto a novembre 2026, che il plugin accetta in via eccezionale. "
-    "Il problema e' lato IGM: la connessione e' stata rifiutata per "
-    "sicurezza. Attendi che l'IGM sistemi il certificato o controlla se "
-    "esiste una versione aggiornata del plugin."
+    "Il certificato SSL del server IGM non puo' essere verificato e la "
+    "connessione e' stata rifiutata per sicurezza. Il problema e' lato IGM "
+    "(certificato scaduto, non valido o catena incompleta): attendi che "
+    "venga sistemato o controlla se esiste una versione aggiornata del plugin."
 )
 
-# Il certificato *.esercito.difesa.it del server IGM e' scaduto a inizio
-# novembre 2026 e QGIS rifiuta la connessione. Finche' l'IGM non lo rinnova,
-# il plugin ripiega su un client Qt diretto che ignora SOLO l'errore
-# "certificato scaduto" e SOLO per questo esatto certificato (impronta SHA-1):
-# l'identita' del server resta verificata (catena, nome host, impronta).
-# Qualsiasi altro errore o certificato viene rifiutato. Con il certificato
-# rinnovato la richiesta normale torna a funzionare e questo codice non serve.
-# (e' l'impronta pubblica di un certificato, non un segreto)
-PINNED_EXPIRED_SHA1 = "a7c18ba99fc1f7afe3be20bcccab0e699fdfea7b"  # pragma: allowlist secret
+# Il server IGM (da novembre 2026, dopo il rinnovo del certificato) invia solo
+# il proprio certificato, senza quello intermedio dell'autorita' che l'ha
+# emesso ("Thawte TLS RSA CA G1"): i browser lo recuperano da soli, QGIS no, e
+# rifiuta la connessione perche' non riesce a ricostruire la catena.
+# Il plugin porta con se' quel certificato intermedio (pubblico, firmato dalla
+# radice DigiCert Global Root G2 gia' presente nei sistemi operativi) e, se la
+# richiesta normale fallisce per un errore SSL, la ripete con un client Qt
+# diretto che lo aggiunge all'elenco dei certificati noti. La verifica resta
+# completa: catena fino alla radice di sistema, scadenza e nome host. Nessun
+# errore SSL viene ignorato.
+EXTRA_CA_FILES = [os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                               "certs", "thawte_tls_rsa_ca_g1.pem")]
 # True dopo il primo ripiego riuscito: nella sessione si usa subito il client
-# diretto, evitando a ogni richiesta l'avviso "Certificato scaduto" di QGIS.
-_use_pinned = False
+# diretto, evitando a ogni richiesta l'avviso SSL di QGIS.
+_use_fallback = False
 
 
-def _only_pinned_expired(errors):
-    """True se gli errori SSL sono solo 'scaduto' sul certificato atteso."""
-    if not errors:
-        return False
-    for err in errors:
-        digest = err.certificate().digest(QCryptographicHash.Algorithm.Sha1)
-        fingerprint = bytes(digest.toHex()).decode("ascii").lower()
-        if (err.error() != QSslError.SslError.CertificateExpired
-                or fingerprint != PINNED_EXPIRED_SHA1):
-            return False
-    return True
+def _extra_ca_certificates():
+    """Certificati intermedi distribuiti con il plugin (lista, anche vuota)."""
+    certs = []
+    for path in EXTRA_CA_FILES:
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+        except OSError:
+            data = b""
+        certs.extend(QSslCertificate.fromData(QByteArray(data)))
+    return certs
 
 
-def _pinned_post(url, body, timeout_ms=None):
-    """POST con client Qt diretto; ritorna i byte della risposta o None."""
+def _ssl_config_with_extra_ca():
+    """Configurazione SSL predefinita piu' i certificati intermedi del plugin,
+    oppure None se il plugin non ne ha."""
+    extra = _extra_ca_certificates()
+    if not extra:
+        return None
+    conf = QSslConfiguration.defaultConfiguration()
+    conf.setCaCertificates(list(QSslConfiguration.systemCaCertificates())
+                           + list(conf.caCertificates()) + extra)
+    return conf
+
+
+def _chain_post(url, body, timeout_ms=None):
+    """POST con client Qt diretto e certificati intermedi aggiunti.
+
+    Ritorna i byte della risposta, oppure None se la richiesta fallisce
+    (compreso qualsiasi errore SSL, che non viene mai ignorato).
+    """
+    conf = _ssl_config_with_extra_ca()
+    if conf is None:
+        return None
     nam = QNetworkAccessManager()
     request = QNetworkRequest(QUrl(url))
+    request.setSslConfiguration(conf)
     request.setHeader(
         QNetworkRequest.KnownHeaders.ContentTypeHeader, "application/json")
     reply = nam.post(request, QByteArray(body))
-
-    def on_ssl_errors(errors):
-        if _only_pinned_expired(errors):
-            reply.ignoreSslErrors(errors)
-
-    reply.sslErrors.connect(on_ssl_errors)
     loop = QEventLoop()
     reply.finished.connect(loop.quit)
-    QTimer.singleShot(int(timeout_ms or PINNED_TIMEOUT_MS), loop.quit)
+    QTimer.singleShot(int(timeout_ms or FALLBACK_TIMEOUT_MS), loop.quit)
     loop.exec()
     raw = None
     if not reply.isFinished():
@@ -264,10 +290,10 @@ def _http_post_json(url, payload, timeout_ms=None):
             "Ambiente QGIS non disponibile: impossibile contattare il "
             "servizio IGM."
         )
-    global _use_pinned
+    global _use_fallback
     body = json.dumps(payload).encode("utf-8")
-    if _use_pinned:
-        raw = _pinned_post(url, body, timeout_ms)
+    if _use_fallback:
+        raw = _chain_post(url, body, timeout_ms)
         if raw:
             return _parse_json(raw.decode("utf-8", "replace"))
     request = QNetworkRequest(QUrl(url))
@@ -276,6 +302,13 @@ def _http_post_json(url, payload, timeout_ms=None):
     )
     if timeout_ms and hasattr(request, "setTransferTimeout"):
         request.setTransferTimeout(int(timeout_ms))
+    # Certificati intermedi gia' nella prima richiesta: QGIS completa la
+    # catena da solo e non mostra la finestra "Configurazione Certificato
+    # Personalizzato" (QGIS unisce questi certificati a quelli del gestore
+    # di autenticazione; la verifica resta completa).
+    ssl_conf = _ssl_config_with_extra_ca()
+    if ssl_conf is not None:
+        request.setSslConfiguration(ssl_conf)
     blocking = QgsBlockingNetworkRequest()
     err = blocking.post(request, QByteArray(body), True)
     if err != QgsBlockingNetworkRequest.ErrorCode.NoError:
@@ -285,9 +318,9 @@ def _http_post_json(url, payload, timeout_ms=None):
             raise _auth_error("HTTP {}".format(status))
         msg = blocking.errorMessage() or str(err)
         if _is_ssl_message(msg):
-            raw = _pinned_post(url, body, timeout_ms)
+            raw = _chain_post(url, body, timeout_ms)
             if raw:
-                _use_pinned = True
+                _use_fallback = True
                 return _parse_json(raw.decode("utf-8", "replace"))
             raise VertoError("{} ({})".format(SSL_HELP, msg))
         raise VertoNetworkError("Errore di rete: {}".format(msg))
@@ -322,7 +355,7 @@ def _convert_chunk(in_epsg, out_epsg, coords, utente, chiave, endpoint):
     if data.get("stato") != "successo":
         msg = data.get("messaggio", "Errore di conversione")
         if _looks_like_auth_error(msg):
-            raise _auth_error(msg, data.get("dove"))
+            raise _auth_error(msg, data.get("dove"), utente, chiave)
         raise VertoError(msg, data.get("dove"))
     out = []
     for item in data.get("coordinate", []):

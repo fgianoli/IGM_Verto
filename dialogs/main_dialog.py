@@ -420,11 +420,14 @@ class MainDialog(QDialog):
         from qgis.PyQt.QtCore import QUrl
         from qgis.core import QgsVectorLayer
         crs = converter.epsg_to_crs(epsg)
-        delim_enc = QUrl.toPercentEncoding(delim).data().decode("ascii")
-        uri = ("file:///{}?delimiter={}&useHeader={}&xField={}&yField={}&crs={}"
-               ).format(path.lstrip("/"), delim_enc,
-                        "yes" if has_header else "no", fields[0], fields[1],
-                        crs.authid() or ("EPSG:%d" % epsg))
+        # Il separatore va scritto come lo vuole il provider "delimitedtext":
+        # virgola e punto e virgola letterali (codificati non funzionano)
+        delim_uri = {"\t": "\\t", " ": "%20"}.get(delim, delim)
+        base = bytes(QUrl.fromLocalFile(path).toEncoded()).decode("ascii")
+        uri = ("{}?type=csv&delimiter={}&useHeader={}&xField={}&yField={}"
+               "&crs={}").format(
+                   base, delim_uri, "Yes" if has_header else "No",
+                   fields[0], fields[1], crs.authid() or ("EPSG:%d" % epsg))
         layer = QgsVectorLayer(uri, os.path.basename(path), "delimitedtext")
         if layer.isValid():
             QgsProject.instance().addMapLayer(layer)
@@ -869,6 +872,8 @@ class MainDialog(QDialog):
                         d["geoms"], d["in_epsg"], out_epsg,
                         progress_cb=pcb, **api)
                     results.append((d, res, None))
+                except verto_api.VertoAuthError:
+                    raise       # credenziali rifiutate: inutile proseguire
                 except Exception as exc:
                     results.append((d, None, str(exc)))
             return results
@@ -985,6 +990,8 @@ class MainDialog(QDialog):
                     ok += 1
                     written.add(out_path)
                     outs.append((out_path, job["out_layer"]))
+                except verto_api.VertoAuthError:
+                    raise       # credenziali rifiutate: inutile proseguire
                 except Exception as exc:
                     errors.append("{}: {}".format(job["label"], exc))
             return {"ok": ok, "errors": errors, "outs": outs, "total": total,

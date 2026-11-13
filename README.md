@@ -114,4 +114,6 @@ le credenziali scadono ogni 3 mesi.
    quelli delle Impostazioni e non restano nella cronologia.
 4. Rinnovale ogni 3 mesi dalla stessa sezione.
 
-Se il servizio rifiuta le credenziali il plugin lo segnala con un messaggio dedicato.
+Il controllo è attivo dal 13 novembre 2026: con i valori predefiniti `qgis` il servizio risponde
+«chiave non corretta [controllo chiave attivo]». Il plugin lo segnala con un messaggio dedicato e,
+nelle conversioni di più layer o di una cartella, si ferma al primo rifiuto.
