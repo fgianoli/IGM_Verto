@@ -1,0 +1,47 @@
+# This file contains metadata for your plugin.
+
+[general]
+name=IGM Verto Coordinate Converter
+qgisMinimumVersion=3.16
+qgisMaximumVersion=4.99
+description=Coordinate conversion using the official IGM grids (Verto online API) - Conversione coordinate con i grigliati ufficiali IGM (API Verto online).
+version=1.4.6
+author=Federico Gianoli
+email=gianoli.federico@gmail.com
+
+about=Plugin for QGIS 3 and 4 that converts coordinates using the IGM "Verto online" REST API (official Italian national grids), more accurate than standard PROJ transformations between Italian datums (Monte Mario/Roma40, ED50, IGM95, ETRS89/RDN2008). Features: reproject vector layers, manual coordinate conversion, batch conversion from CSV, map-click tool and a Processing algorithm. Requires an internet connection. --- Plugin per QGIS 3 e 4 che converte coordinate usando l'API REST "Verto online" dell'IGM (grigliati nazionali ufficiali), piu' precisa delle trasformazioni PROJ standard tra i datum italiani (Monte Mario/Roma40, ED50, IGM95, ETRS89/RDN2008). Funzioni: riproiezione di layer vettoriali, conversione manuale, conversione batch da CSV, strumento di click sulla mappa e algoritmo Processing. Richiede una connessione internet. Servizio IGM: https://igmi.esercito.difesa.it/servizi/verto-online/
+
+tracker=https://github.com/fgianoli/IGM_Verto/issues
+repository=https://github.com/fgianoli/IGM_Verto
+homepage=https://github.com/fgianoli/IGM_Verto
+
+changelog=
+    1.4.6 - Certificato IGM rinnovato (11 novembre 2026): il server ora invia il certificato senza quello intermedio dell'autorita' emittente e QGIS rifiuta la connessione. Il plugin distribuisce il certificato intermedio pubblico (Thawte TLS RSA CA G1) e lo usa per completare la catena: verifica completa, nessun errore SSL ignorato. Rimosso il ripiego della 1.4.3 per il certificato scaduto, non piu' necessario
+    1.4.5 - CSV: il risultato ora viene davvero caricato come layer di punti anche con separatore punto e virgola o virgola senza intestazione e con percorsi contenenti spazi o accenti (difetto trovato dalla nuova suite di test eseguita in QGIS). Aggiunti test di integrazione automatici
+    1.4.4 - Cartella (batch): i file con piu' layer (es. GeoPackage) vengono convertiti per intero, non piu' solo il primo layer; in output un GeoPackage con tutti i layer oppure, negli altri formati, un file per layer; le tabelle senza geometria sono ignorate. Impostazioni: il plugin non scrive piu' i valori predefiniti ne' l'elenco SRS nel file QGIS3.ini/QGIS4.ini (restano solo utente, chiave ed endpoint se personalizzati; l'elenco SRS e' in un file nella cartella del plugin, eliminato con la disinstallazione); le chiavi lasciate dalle versioni precedenti vengono rimosse all'avvio; alla disinstallazione dal gestore plugin le impostazioni salvate vengono eliminate in automatico (anche con il nuovo pulsante "Rimuovi tutte le impostazioni salvate")
+    1.4.3 - Certificato IGM scaduto: il plugin torna a funzionare senza intervento dell'utente. Se QGIS rifiuta la connessione, la richiesta viene ripetuta accettando solo l'errore "certificato scaduto" e solo per il certificato IGM noto (impronta fissata): catena, nome host e identita' del server restano verificati, ogni altro errore o certificato e' rifiutato. Quando l'IGM rinnova il certificato il ripiego non viene piu' usato. Rimossa l'opzione "Ignora errori del certificato SSL" introdotta nella 1.4.1: non serve piu' e disattivava ogni verifica
+    1.4.2 - Revisione generale. Sicurezza: la chiave IGM non e' piu' proposta come valore predefinito nell'algoritmo Processing (restava in chiaro nella cronologia) ed e' salvata cifrata nel gestore di autenticazione di QGIS. Rete: blocchi da 5000 punti con due nuovi tentativi sugli errori di rete, coordinate ripetute inviate una sola volta, un solo tentativo per sessione di leggere l'elenco SRS a server irraggiungibile, cache dell'elenco rinnovata ogni settimana. CSV: virgola decimale accettata, righe saltate contate, pulsante Annulla funzionante, caricamento come punti anche senza intestazione. Altro: nomi di output unici nel batch con sottocartelle, messaggio chiaro se il CRS del progetto non e' gestito (click sulla mappa), controllo stesso datum in Processing, codici legacy nell'elenco di ripiego, compatibilita' enum QGIS 4 nel salvataggio su file
+    1.4.1 - Certificato SSL del server IGM scaduto (7 novembre 2026): messaggio d'errore esplicito e nuova opzione in Impostazioni "Ignora errori del certificato SSL (non sicuro)", disattivata di default e con avviso, da usare solo finche' l'IGM non rinnova il certificato
+    1.4.0 - Scheda Layer: nuova modalita' "Piu layer del progetto" per riproiettare piu layer vettoriali caricati in una sola operazione (elenco con caselle, seleziona/deseleziona tutti, origine letta dal CRS di ciascun layer, output in memoria o in cartella, layer non convertibili saltati e segnalati)
+    1.3.5 - Verifica completa dei sistemi supportati dal servizio IGM (20 EPSG, tutti presenti): corretta l'appartenenza al datum di ETRS89-LAEA/LCC (3035, 3034), che per il servizio e' lo stesso di IGM95 e non di RDN2008; ora le conversioni 3035/3034 <-> RDN2008 non sono piu' bloccate dal plugin e quelle 3035/3034 <-> IGM95 sono segnalate prima della chiamata
+    1.3.4 - Istruzioni e link alla pagina IGM per ottenere le credenziali (login, Area Riservata, Abbonamenti ai servizi; obbligatorie dal 1 novembre 2026, scadenza trimestrale) in Impostazioni, guida e README, con pulsante per aprire la pagina; aggiunto EPSG:6875 (Italy zone, N-E) inoltrato come 7794
+    1.3.3 - Sicurezza/qualita': rimosso un blocco try/except/continue segnalato dalla scansione del repository plugin
+    1.3.2 - Allineamento al nuovo elenco SRS del servizio IGM (ottobre 2026): 7795 e 7791-7793 (RDN2008 proiettato, assi E-N) ora nativi; i vecchi 6876/6707/6708/6709 (assi N-E) restano accettati e sono inoltrati con il codice nuovo, con avviso. Riconoscimento dei layer con CRS personalizzato (es. shapefile scaricati dal geoportale regionale con .prj "RDN2008 / Zone 12") tramite i parametri di proiezione
+    1.3.1 - Aggiunto EPSG:7795 (RDN2008 / Zone 12, E-N): non e' ancora supportato dal servizio IGM, viene inoltrato come EPSG:6876 (stessi parametri, cambia solo l'ordine degli assi), con avviso esplicativo nell'interfaccia, nell'etichetta del menu, nella guida e nel log Processing
+    1.3.0 - Preparazione al controllo utente+chiave IGM (attivazione prevista entro fine 2026): impostazioni con link a "Abbonamenti ai servizi", chiave mascherata, messaggio guidato se le credenziali sono rifiutate o scadute (validita' trimestrale)
+    1.2.5 - Fix risposta server con righe di log (parsing JSON robusto, blocchi da 32000); preservazione quota Z nella riproiezione; conversione layer/cartella in background (QgsTask) con finestra di progresso annullabile; messaggio chiaro quando origine/destinazione hanno lo stesso datum (non supportato dal servizio)
+    1.2.4 - Pulizia codice (Flake8): risolti W503/W504
+    1.2.3 - Pulizia codice (Flake8): rimosso import inutilizzato e statement multipli
+    1.2.2 - Rimosso flag di metadati deprecato; compatibilità QGIS 4 dichiarata via qgisMaximumVersion
+    1.2.1 - Sicurezza: richieste di rete solo via QgsBlockingNetworkRequest (risolto avviso Bandit B310)
+    1.2.0 - Fix interfaccia utente
+    1.1.0 - Toolbar con icona singola e menu a tendina, icone distinte, sezione Guida in italiano, metadati bilingue EN/IT, condizioni d'uso IGM
+    1.0.0 - Prima versione: conversione manuale/CSV/layer, click su mappa, algoritmo Processing
+
+tags=igm,coordinate,conversione,riproiezione,grigliati,verto,italia,datum,epsg,reproject
+category=Vector
+icon=icon.svg
+experimental=False
+deprecated=False
+hasProcessingProvider=yes
+server=False

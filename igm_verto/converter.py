@@ -1,0 +1,460 @@
+# -*- coding: utf-8 -*-
+"""
+Logica di conversione geometrie/layer condivisa tra dialog e Processing.
+
+Convenzione API IGM: "e" (est) = X (longitudine/easting), "n" (nord) = Y
+(latitudine/northing). QGIS usa la stessa convenzione X=est, Y=nord, quindi
+(e, n) == (x, y).
+"""
+
+from qgis.core import (
+    QgsGeometry,
+    QgsPoint,
+    QgsCoordinateReferenceSystem,
+    QgsVectorLayer,
+    QgsFeature,
+    QgsWkbTypes,
+)
+
+from . import verto_api
+
+
+def crs_to_epsg(crs):
+    """Restituisce il codice EPSG (int) di un QgsCoordinateReferenceSystem, o None.
+
+    Se il CRS non ha un codice EPSG (tipico dei file scaricati da geoportali
+    regionali, il cui .prj porta un SR "personalizzato"), prova a riconoscerlo
+    dai parametri di proiezione: vedi match_epsg_by_params().
+    """
+    if crs is None or not crs.isValid():
+        return None
+    auth = crs.authid()  # es. "EPSG:3003"
+    if auth and auth.upper().startswith("EPSG:"):
+        try:
+            return int(auth.split(":")[1])
+        except (ValueError, IndexError):
+            return None
+    pg = crs.postgisSrid()
+    if pg:
+        return int(pg)
+    return _guess_epsg_from_custom_crs(crs)
+
+
+# --- Riconoscimento di CRS personalizzati equivalenti a un EPSG supportato ---
+
+_KEY_PARAMS = ("proj", "zone", "lat_0", "lon_0", "k", "x_0", "y_0", "ellps", "units")
+_NUMERIC_DEFAULTS = {"lat_0": 0.0, "lon_0": 0.0, "k": 1.0, "x_0": 0.0, "y_0": 0.0}
+
+
+def proj_key(proj_string):
+    """Chiave normalizzata dei parametri di proiezione di una stringa PROJ.
+
+    Restituisce None per CRS non proiettati (geografici), che non si possono
+    distinguere in modo affidabile (es. IGM95 / RDN2008 / ETRS89).
+    """
+    params = {}
+    for tok in (proj_string or "").split():
+        if tok.startswith("+") and "=" in tok:
+            k, v = tok[1:].split("=", 1)
+            params[k] = v
+    if params.get("proj") in (None, "longlat", "latlong"):
+        return None
+    if "k_0" in params and "k" not in params:
+        params["k"] = params["k_0"]
+    key = []
+    for name in _KEY_PARAMS:
+        val = params.get(name)
+        if name in _NUMERIC_DEFAULTS:
+            try:
+                val = round(float(val), 6) if val is not None else _NUMERIC_DEFAULTS[name]
+            except ValueError:
+                return None
+        elif name == "units":
+            val = val or "m"
+        key.append(val)
+    return tuple(key)
+
+
+def match_epsg_by_params(custom_key, candidates):
+    """candidates: dict {epsg: chiave}. Ritorna l'EPSG se la corrispondenza e'
+    univoca (i codici legacy N-E e i nuovi E-N contano come uno: stessi parametri),
+    altrimenti None."""
+    if custom_key is None:
+        return None
+    hits = {e for e, k in candidates.items() if k == custom_key}
+    hits = {verto_api.to_server_epsg(e) for e in hits}
+    return hits.pop() if len(hits) == 1 else None
+
+
+def _crs_proj(crs):
+    """Stringa PROJ del CRS (toProj in QGIS recenti, toProj4 nelle vecchie)."""
+    fn = getattr(crs, "toProj", None) or getattr(crs, "toProj4", None)
+    return fn() if fn else ""
+
+
+def _guess_epsg_from_custom_crs(crs):
+    key = proj_key(_crs_proj(crs))
+    if key is None:
+        return None
+    candidates = {}
+    for codes in DATUM_FAMILIES.values():
+        for code in codes:
+            c = QgsCoordinateReferenceSystem.fromEpsgId(int(code))
+            if c.isValid():
+                k = proj_key(_crs_proj(c))
+                if k is not None:
+                    candidates[code] = k
+    return match_epsg_by_params(key, candidates)
+
+
+def epsg_to_crs(epsg):
+    return QgsCoordinateReferenceSystem.fromEpsgId(int(epsg))
+
+
+# Famiglie di datum tra i sistemi supportati da IGM. Il servizio non converte
+# tra sistemi dello stesso datum (cambio di sola proiezione/fuso): in quel caso
+# va usata la riproiezione standard di QGIS, esatta e senza grigliati.
+DATUM_FAMILIES = {
+    "Monte Mario / Roma40": {4265, 3003, 3004, 4806},
+    "ED50": {4230, 23032, 23033, 23034},
+    # Per il servizio IGM, ETRS89-LAEA/LCC (3035, 3034) appartengono allo
+    # stesso datum di IGM95 (ETRF89), non di RDN2008 (ETRF2000): verificato
+    # con la matrice completa delle conversioni (ottobre 2026).
+    "IGM95 / ETRF89": {4670, 3064, 3065, 9716, 3035, 3034},
+    "RDN2008 / ETRF2000": {6706, 6707, 6708, 6709, 6875, 6876, 7791, 7792,
+                           7793, 7794, 7795},
+}
+
+
+def datum_of(epsg):
+    """Restituisce il nome della famiglia di datum dell'EPSG, o None."""
+    try:
+        code = int(epsg)
+    except (TypeError, ValueError):
+        return None
+    for name, codes in DATUM_FAMILIES.items():
+        if code in codes:
+            return name
+    return None
+
+
+def same_datum(in_epsg, out_epsg):
+    """True se i due EPSG appartengono allo stesso datum (conversione non
+    ammessa dal servizio IGM)."""
+    da = datum_of(in_epsg)
+    db = datum_of(out_epsg)
+    return da is not None and da == db
+
+
+def convert_geometries(geometries, in_epsg, out_epsg, utente="qgis",
+                       chiave="qgis", endpoint=verto_api.ENDPOINT,
+                       max_coord=verto_api.DEFAULT_MAX_COORD, progress_cb=None):
+    """
+    Converte una lista di QgsGeometry. Tutti i vertici di tutte le geometrie
+    vengono raccolti e inviati in batch (rispettando max_coord), poi riscritti.
+    Le coordinate ripetute (bordi condivisi tra poligoni adiacenti, vertice di
+    chiusura degli anelli) sono inviate al servizio una sola volta.
+    La quota Z e l'eventuale valore M dei vertici vengono preservati (il
+    servizio IGM converte solo la planimetria).
+    Restituisce una nuova lista di QgsGeometry (le originali non sono modificate).
+    """
+    all_points = []
+    orig_meta = []      # (z, m) per vertice, per conservare quota/misura
+    spans = []          # (start, count) per geometria
+    out_geoms = []
+    for geom in geometries:
+        if geom is None or geom.isEmpty() or geom.isNull():
+            spans.append((len(all_points), 0))
+            out_geoms.append(QgsGeometry(geom) if geom is not None else QgsGeometry())
+            continue
+        g = QgsGeometry(geom)  # copia
+        start = len(all_points)
+        count = 0
+        for v in g.vertices():
+            all_points.append((v.x(), v.y()))
+            z = v.z() if v.is3D() else None
+            m = v.m() if v.isMeasure() else None
+            orig_meta.append((z, m))
+            count += 1
+        spans.append((start, count))
+        out_geoms.append(g)
+
+    if all_points:
+        unique, index = unique_points(all_points)
+        conv_unique = verto_api.convert(
+            in_epsg, out_epsg, unique,
+            utente=utente, chiave=chiave, endpoint=endpoint,
+            max_coord=max_coord, progress_cb=progress_cb,
+        )
+        converted = [conv_unique[i] for i in index]
+    else:
+        converted = []
+
+    for g, (start, count) in zip(out_geoms, spans):
+        for k in range(count):
+            x, y = converted[start + k]
+            z, m = orig_meta[start + k]
+            new_pt = QgsPoint(float(x), float(y))
+            if z is not None:
+                new_pt.addZValue(z)
+            if m is not None:
+                new_pt.addMValue(m)
+            g.moveVertex(new_pt, k)
+    return out_geoms
+
+
+def unique_points(points):
+    """Elimina le coordinate ripetute.
+
+    Ritorna (unique, index): unique e' la lista delle coordinate distinte
+    nell'ordine di prima comparsa, index[i] la posizione in unique del punto i.
+    """
+    seen = {}
+    unique = []
+    index = []
+    for pt in points:
+        pos = seen.get(pt)
+        if pos is None:
+            pos = len(unique)
+            seen[pt] = pos
+            unique.append(pt)
+        index.append(pos)
+    return unique, index
+
+
+def reproject_layer_to_memory(source_layer, out_epsg, selected_only=False,
+                              utente="qgis", chiave="qgis",
+                              endpoint=verto_api.ENDPOINT,
+                              max_coord=verto_api.DEFAULT_MAX_COORD,
+                              progress_cb=None, in_epsg=None):
+    """
+    Riproietta un QgsVectorLayer creando un layer in memoria con CRS out_epsg.
+    Restituisce (memory_layer, n_features).
+    """
+    if in_epsg is None:
+        in_epsg = crs_to_epsg(source_layer.crs())
+    if in_epsg is None:
+        raise verto_api.VertoError(
+            "Impossibile determinare il codice EPSG del layer di origine."
+        )
+
+    if selected_only:
+        features = list(source_layer.selectedFeatures())
+    else:
+        features = list(source_layer.getFeatures())
+
+    geoms = [f.geometry() for f in features]
+    new_geoms = convert_geometries(
+        geoms, in_epsg, out_epsg, utente=utente, chiave=chiave,
+        endpoint=endpoint, max_coord=max_coord, progress_cb=progress_cb,
+    )
+
+    geom_type = QgsWkbTypes.displayString(source_layer.wkbType())
+    out_crs = epsg_to_crs(out_epsg)
+    uri = "{}?crs={}".format(geom_type, out_crs.authid() or ("EPSG:%d" % out_epsg))
+    mem = QgsVectorLayer(
+        uri, "{}_EPSG{}".format(source_layer.name(), out_epsg), "memory"
+    )
+    dp = mem.dataProvider()
+    dp.addAttributes(source_layer.fields().toList())
+    mem.updateFields()
+
+    out_feats = []
+    for f, g in zip(features, new_geoms):
+        nf = QgsFeature(mem.fields())
+        nf.setAttributes(f.attributes())
+        nf.setGeometry(g)
+        out_feats.append(nf)
+    dp.addFeatures(out_feats)
+    mem.updateExtents()
+    return mem, len(out_feats)
+
+
+def geoms_to_memory_layer(name, fields, wkb_type, out_epsg, attributes, geoms):
+    """Costruisce un layer in memoria da geometrie gia' convertite.
+
+    Pensata per essere chiamata nel thread principale (es. al termine di un
+    QgsTask), separando la parte di rete da quella di costruzione del layer.
+    """
+    geom_type = QgsWkbTypes.displayString(wkb_type)
+    out_crs = epsg_to_crs(out_epsg)
+    uri = "{}?crs={}".format(geom_type, out_crs.authid() or ("EPSG:%d" % out_epsg))
+    mem = QgsVectorLayer(uri, name, "memory")
+    dp = mem.dataProvider()
+    dp.addAttributes(fields.toList())
+    mem.updateFields()
+    feats = []
+    for attrs, g in zip(attributes, geoms):
+        nf = QgsFeature(mem.fields())
+        nf.setAttributes(attrs)
+        nf.setGeometry(g)
+        feats.append(nf)
+    dp.addFeatures(feats)
+    mem.updateExtents()
+    return mem, len(feats)
+
+
+# --------------------------------------------------------------------------
+# Salvataggio su file e conversione batch di una cartella
+# --------------------------------------------------------------------------
+import os  # noqa: E402
+
+VECTOR_EXTS = {".shp", ".gpkg", ".geojson", ".json", ".kml", ".gml",
+               ".tab", ".csv"}
+
+_DRIVER_BY_EXT = {
+    ".gpkg": "GPKG", ".shp": "ESRI Shapefile", ".geojson": "GeoJSON",
+    ".json": "GeoJSON", ".kml": "KML", ".gml": "GML", ".csv": "CSV",
+}
+
+
+def list_vector_files(folder, recursive=False):
+    """Elenco di file vettoriali in una cartella (ordinato)."""
+    out = []
+    if recursive:
+        for dp, _dn, fn in os.walk(folder):
+            for f in fn:
+                if os.path.splitext(f)[1].lower() in VECTOR_EXTS:
+                    out.append(os.path.join(dp, f))
+    else:
+        for f in os.listdir(folder):
+            p = os.path.join(folder, f)
+            if os.path.isfile(p) and os.path.splitext(f)[1].lower() in VECTOR_EXTS:
+                out.append(p)
+    return sorted(out)
+
+
+SUBLAYER_SEP = "!!::!!"
+_NO_GEOM = ("none", "nogeometry", "no geometry")
+
+
+def parse_sublayers(entries):
+    """Interpreta l'elenco dataProvider().subLayers() di un file OGR.
+
+    Ritorna [(nome_layer, tipo_geometria), ...] escludendo le tabelle senza
+    geometria (non c'e' nulla da riproiettare).
+    """
+    out = []
+    for entry in entries or []:
+        parts = entry.split(SUBLAYER_SEP)
+        if len(parts) < 2:
+            continue
+        gtype = parts[3] if len(parts) > 3 else ""
+        if gtype.strip().lower() in _NO_GEOM:
+            continue
+        out.append((parts[1], gtype))
+    return out
+
+
+def list_sublayers(path):
+    """Layer vettoriali contenuti in un file (un GeoPackage puo' averne molti)."""
+    from qgis.core import QgsVectorLayer
+    layer = QgsVectorLayer(path, os.path.basename(path), "ogr")
+    if not layer.isValid():
+        return []
+    return parse_sublayers(layer.dataProvider().subLayers())
+
+
+def _safe_name(text):
+    return "".join(c if (c.isalnum() or c in "-_ .") else "_"
+                   for c in text).strip() or "layer"
+
+
+def plan_batch(files_sublayers, out_dir, out_epsg, ext):
+    """Pianifica la conversione batch: una voce per ogni layer di ogni file.
+
+    files_sublayers: [(percorso, [(nome_layer, tipo_geometria), ...]), ...]
+    Ritorna una lista di dict con: in_path, layer_uri (suffisso da aggiungere
+    al percorso per aprire quel layer, "" per i file a layer singolo), label,
+    out_path, out_layer (nome del layer nel file di output, o None).
+    Un file con piu' layer produce un solo GeoPackage con tutti i layer,
+    oppure - negli altri formati - un file per layer. I nomi di output sono
+    resi unici (file omonimi in sottocartelle diverse).
+    """
+    used = set()
+
+    def unique(base):
+        path = os.path.join(out_dir, base + ext)
+        k = 2
+        while path.lower() in used:
+            path = os.path.join(out_dir, "{}_{}{}".format(base, k, ext))
+            k += 1
+        used.add(path.lower())
+        return path
+
+    jobs = []
+    for in_path, subs in files_sublayers:
+        fname = os.path.basename(in_path)
+        base = "{}_EPSG{}".format(os.path.splitext(fname)[0], out_epsg)
+        if len(subs) <= 1:
+            jobs.append({"in_path": in_path, "layer_uri": "", "label": fname,
+                         "out_path": unique(base), "out_layer": None})
+            continue
+        names = [n for n, _g in subs]
+        shared = unique(base) if ext == ".gpkg" else None
+        for name, gtype in subs:
+            uri = "|layername={}".format(name)
+            lname = name
+            if names.count(name) > 1 and gtype:
+                # stesso nome con piu' tipi di geometria
+                uri += "|geometrytype={}".format(gtype)
+                lname = "{}_{}".format(name, gtype)
+            jobs.append({
+                "in_path": in_path, "layer_uri": uri,
+                "label": "{} / {}".format(fname, lname),
+                "out_path": shared or unique(
+                    "{}_{}".format(base, _safe_name(lname))),
+                "out_layer": lname})
+    return jobs
+
+
+def write_vector(layer, out_path, layer_name=None, append=False):
+    """Scrive un QgsVectorLayer su file scegliendo il driver dall'estensione.
+
+    layer_name: nome del layer nel GeoPackage (predefinito: nome del file).
+    append: aggiunge il layer a un GeoPackage esistente invece di ricrearlo.
+    """
+    from qgis.core import QgsVectorFileWriter, QgsProject
+    ext = os.path.splitext(out_path)[1].lower()
+    driver = _DRIVER_BY_EXT.get(ext, "GPKG")
+    ctx = QgsProject.instance().transformContext()
+    opts = QgsVectorFileWriter.SaveVectorOptions()
+    opts.driverName = driver
+    if ext == ".gpkg":
+        opts.layerName = (layer_name
+                          or os.path.splitext(os.path.basename(out_path))[0])
+        if append and os.path.exists(out_path):
+            actions = getattr(QgsVectorFileWriter, "ActionOnExistingFile",
+                              QgsVectorFileWriter)
+            opts.actionOnExistingFile = actions.CreateOrOverwriteLayer
+    try:
+        res = QgsVectorFileWriter.writeAsVectorFormatV3(layer, out_path, ctx, opts)
+    except AttributeError:  # QGIS < 3.20
+        res = QgsVectorFileWriter.writeAsVectorFormatV2(layer, out_path, ctx, opts)
+    code = res[0] if isinstance(res, (tuple, list)) else res
+    # Enum con ambito in QGIS 4 / PyQt6, senza ambito nelle versioni vecchie
+    no_error = getattr(
+        getattr(QgsVectorFileWriter, "WriterError", QgsVectorFileWriter),
+        "NoError")
+    if code != no_error:
+        detail = res[1] if isinstance(res, (tuple, list)) and len(res) > 1 else code
+        raise verto_api.VertoError("Scrittura su file fallita: {}".format(detail))
+    return out_path
+
+
+def reproject_path_to_file(in_path, out_path, out_epsg, fallback_in_epsg=None,
+                           layer_uri="", out_layer=None, append=False,
+                           **kwargs):
+    """Apre un file vettoriale (o uno dei suoi layer, con layer_uri), lo
+    riproietta via IGM e lo salva su out_path."""
+    from qgis.core import QgsVectorLayer
+    layer = QgsVectorLayer(in_path + layer_uri, os.path.basename(in_path), "ogr")
+    if not layer.isValid():
+        raise verto_api.VertoError("Layer non valido: {}".format(in_path))
+    in_epsg = crs_to_epsg(layer.crs()) or fallback_in_epsg
+    if in_epsg is None:
+        raise verto_api.VertoError(
+            "CRS non determinabile per {}".format(os.path.basename(in_path)))
+    mem, n = reproject_layer_to_memory(layer, out_epsg, in_epsg=in_epsg, **kwargs)
+    write_vector(mem, out_path, layer_name=out_layer, append=append)
+    return n

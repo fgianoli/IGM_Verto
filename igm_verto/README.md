@@ -1,0 +1,117 @@
+# IGM Verto Coordinate Converter
+
+Plugin per **QGIS 3 e QGIS 4** che converte coordinate usando i **grigliati ufficiali IGM**
+tramite l'API REST *"Verto on line"* dell'Istituto Geografico Militare. È più preciso delle
+trasformazioni PROJ standard tra i datum italiani (Monte Mario/Roma40, ED50, IGM95,
+ETRS89/RDN2008) perché usa i grigliati nazionali.
+
+Servizio IGM: https://igmi.esercito.difesa.it/servizi/verto-online/
+Richiede connessione internet.
+
+## Funzionalità
+
+- **Conversione coordinate manuali** — incolla coppie E/N e ottieni il risultato (con copia/incolla).
+- **Conversione da file CSV** — conversione batch con scelta di separatore, colonne, intestazione;
+  output CSV e caricamento opzionale come layer di punti. Sono accettati i numeri con la
+  virgola decimale (se il separatore non è la virgola) e le righe non numeriche vengono contate.
+- **Riproiezione di layer vettoriali** — crea un nuovo layer in memoria convertendo tutti i
+  vertici (punti, linee, poligoni, multi-geometrie); supporta "solo elementi selezionati".
+- **Più layer alla volta** — nella scheda Layer, modalità "Più layer del progetto": spunta
+  quanti layer vettoriali vuoi dall'elenco dei layer caricati e li riproietta in un'unica
+  operazione, ciascuno dal proprio CRS (in memoria o salvati in una cartella). I layer non
+  convertibili (già nel CRS di destinazione, stesso datum, CRS sconosciuto) sono saltati e
+  segnalati.
+- **Strumento click sulla mappa** — clicca un punto e leggi le coordinate convertite nella barra messaggi.
+- **Algoritmo Processing** — *IGM Verto ▸ Riproietta con grigliati IGM (Verto)*, utilizzabile in
+  toolbox, batch e modelli grafici.
+- **Impostazioni** — credenziali utente/chiave (obbligatorie dal 1° novembre 2026, vedi sotto),
+  endpoint configurabile e aggiornamento dell'elenco dei sistemi di riferimento.
+
+## Sistemi di riferimento supportati
+
+L'elenco viene letto dal server (richiesta `info`) e include, tra gli altri:
+Monte Mario (EPSG:4265, 3003, 3004, 4806), ED50 (4230, 23032/33/34),
+IGM95 (4670, 3064, 3065, 9716), ETRS89-LAEA/LCC (3035, 3034),
+RDN2008 (6706, 7791, 7792, 7793, 7794, 7795).
+
+> Dall'ottobre 2026 l'IGM offre gli RDN2008 proiettati solo con assi E-N
+> (**7791, 7792, 7793, 7794, 7795**). I vecchi codici N-E (**6875, 6876, 6707,
+> 6708, 6709**), presenti in molti file dei geoportali regionali, sono accettati e
+> inoltrati al servizio con il codice E-N equivalente (stessi parametri, cambia
+> solo l'ordine degli assi); l'interfaccia mostra un avviso. I CRS
+> "personalizzati" con parametri identici a un EPSG supportato sono
+> riconosciuti automaticamente.
+
+> Nota: le conversioni nello **stesso datum** non sono supportate dal servizio
+> (es. da "RDN2008 2D geo" a "RDN2008 / TM32").
+
+## Installazione
+
+1. In QGIS: *Plugin ▸ Gestisci e installa plugin ▸ Installa da ZIP* e seleziona
+   `igm_verto.zip`.
+2. Oppure copia la cartella `igm_verto/` nella cartella dei plugin QGIS:
+   - Windows: `%APPDATA%\QGIS\QGIS3\profiles\default\python\plugins\`
+   - Linux: `~/.local/share/QGIS/QGIS3/profiles/default/python/plugins/`
+   - macOS: `~/Library/Application Support/QGIS/QGIS3/profiles/default/python/plugins/`
+3. Attiva il plugin dall'elenco. Comparirà il menu/toolbar **IGM Verto**.
+
+## Note tecniche
+
+- Le richieste di rete usano `QgsBlockingNetworkRequest` (rispetta proxy/SSL di QGIS).
+- Le coordinate vengono inviate in blocchi di al più 5000 punti (il servizio ne ammette
+  32000 per richiesta, `maxCoord`); le coordinate ripetute sono inviate una sola volta e,
+  in caso di errore di rete, il blocco viene ritentato due volte prima di interrompere.
+- L'elenco dei sistemi è tenuto in cache e rinnovato dal servizio dopo una settimana.
+- Nel file `QGIS3.ini`/`QGIS4.ini` il plugin scrive solo utente, chiave ed endpoint, e solo se diversi
+  dai predefiniti; l'elenco dei sistemi sta in `srs_cache.json` nella cartella del plugin. Alla
+  disinstallazione dal gestore plugin di QGIS il plugin elimina tutto ciò che ha salvato (lo stesso fa
+  *Impostazioni ▸ Rimuovi tutte le impostazioni salvate*).
+- Convenzione: `e` = est/longitudine (X), `n` = nord/latitudine (Y); le coordinate
+  geografiche sono in **gradi sessadecimali**.
+- Compatibilità Qt5 (QGIS 3) e Qt6 (QGIS 4) tramite `qgis.PyQt` ed enum con scope.
+
+## Verifica
+
+L'esempio del manuale (EPSG:4265 → 6706) è stato verificato sul servizio live:
+
+| Input (E, N)   | Output (E, N)                  |
+|----------------|--------------------------------|
+| 7.0, 37.0      | 6.9996175526, 37.0006110152    |
+| 12.0, 42.0     | 11.9997804498, 42.0006477023   |
+| 16.0, 45.0     | 15.9999259776, 45.0006501430   |
+
+## Condizioni d'uso e licenza
+
+Il servizio di conversione è fornito dall'**Istituto Geografico Militare (IGM)** —
+*Verto Online*. Secondo le [Condizioni di Uso ufficiali](https://igmi.esercito.difesa.it/servizi/verto-online/):
+
+- l'utilizzo delle API è **libero, anche per finalità commerciali**, purché non si
+  comprometta/sovraccarichi il servizio, non si tentino accessi non autorizzati e si
+  rispettino le normative (l'IGM può applicare limiti/quote o sospendere il servizio);
+- il software e l'infrastruttura **restano di proprietà esclusiva dell'IGM**;
+  l'accesso alle API non trasferisce diritti sul software;
+- **licenza dei risultati**: salvo diversa indicazione, i risultati mantengono la
+  stessa licenza dei dati in ingresso;
+- servizio fornito **"as is", senza garanzie** e con esclusione di responsabilità.
+
+> Nota: Verto Online **non** è rilasciato sotto CC BY 4.0 (licenza usata invece per
+> altri servizi IGM, es. WFS). Citare comunque la fonte quando si pubblicano dati
+> convertiti: «Conversioni effettuate con il servizio Verto Online dell'IGM».
+
+Il codice di questo plugin è cosa distinta dal servizio e può avere una propria
+licenza (molti plugin QGIS usano la GPL).
+
+## Credenziali IGM (dal 1° novembre 2026)
+
+Dal 1° novembre 2026 il servizio Verto online richiede un account (gratuito);
+le credenziali scadono ogni 3 mesi.
+
+1. Apri la [pagina IGM di Verto online](https://igmi.esercito.difesa.it/servizi/verto-online/) ed effettua il **login**.
+2. Entra nell'**Area Riservata** e scegli **Abbonamenti ai servizi** (ultimo tasto a sinistra nella pagina utente).
+3. Copia nome utente e chiave/password in *Impostazioni* del plugin. La chiave personale è
+   salvata cifrata nel gestore di autenticazione di QGIS (può essere richiesta la password
+   principale di QGIS). Nell'algoritmo Processing lascia vuoti utente e chiave: vengono usati
+   quelli delle Impostazioni e non restano nella cronologia.
+4. Rinnovale ogni 3 mesi dalla stessa sezione.
+
+Se il servizio rifiuta le credenziali il plugin lo segnala con un messaggio dedicato.
